@@ -1,0 +1,20 @@
+# kube-prometheus-stack values
+# 팀원이 helm 기본값으로 설치한 상태를 그대로 옮김 (helm get values 결과: 비어 있음)
+# 아래는 현재 실제로 적용된 값을 명시만 해둔 것 (차트 기본값과 동일)
+# 차트 기본값: https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/values.yaml
+
+prometheus:
+  service:
+    type: ClusterIP
+
+  prometheusSpec:
+    # scrapeInterval: 30s     (operator 기본값)
+    # evaluationInterval: 30s (operator 기본값)
+    retention: 10d
+
+    # 아직 영구 저장소 미연결 (Pod 재시작 시 메트릭 삭제됨)
+    # NFS 연결 테스트 완료 후 nfs-prometheus StorageClass로 연결 예정
+
+grafana:
+  service:
+    type: ClusterIP
