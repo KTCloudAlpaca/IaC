@@ -1,0 +1,29 @@
+# Provider/모듈 캐시
+.terraform/
+
+# State (비밀번호가 평문으로 들어감)
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# 변수 값 (비밀번호)
+*.tfvars
+*.tfvars.json
+
+# plan 파일 (sensitive 값 포함)
+*.tfplan
+tfplan
+
+# 크래시 로그
+crash.log
+crash.*.log
+
+# 로컬 override
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI 설정 (토큰이 들어갈 수 있음)
+.terraformrc
+terraform.rc
