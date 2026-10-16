@@ -27,3 +27,6 @@ override.tf.json
 # CLI 설정 (토큰이 들어갈 수 있음)
 .terraformrc
 terraform.rc
+
+# aws-bootstrap 이 만드는 recovery.zip
+.build/

@@ -1,0 +1,23 @@
+#!/bin/bash
+# DR worker: 공통 설치 후 master 에 join (master 가 준비될 때까지 재시도)
+set -euxo pipefail
+exec > >(tee -a /var/log/dr-bootstrap.log) 2>&1
+export HOME=/root
+echo "DR_BOOT_START $(date -Is)"
+
+K8S_VERSION="${kubernetes_version}"
+
+${common}
+
+# 같은 VPC 안이라 CA 해시 검증은 생략
+set +x
+until kubeadm join "${master_ip}:6443" \
+  --token "${kubeadm_token}" \
+  --discovery-token-unsafe-skip-ca-verification; do
+  echo "waiting for master..."
+  kubeadm reset -f >/dev/null 2>&1 || true
+  sleep 15
+done
+set -x
+
+echo "DR_BOOT_DONE $(date -Is)"

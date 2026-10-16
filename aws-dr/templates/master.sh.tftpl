@@ -1,0 +1,197 @@
+#!/bin/bash
+# DR master: kubeadm init -> CNI/스토리지 -> MongoDB 배포 -> S3 최신 백업으로 복원
+# 진행 로그: /var/log/dr-bootstrap.log  (DR_* 줄의 시각으로 RTO 측정)
+set -euxo pipefail
+exec > >(tee -a /var/log/dr-bootstrap.log) 2>&1
+export HOME=/root
+echo "DR_BOOT_START $(date -Is)"
+
+K8S_VERSION="${kubernetes_version}"
+
+${common}
+
+# ---------- 클러스터 ----------
+
+kubeadm init \
+  --token "${kubeadm_token}" \
+  --token-ttl 0 \
+  --pod-network-cidr 10.244.0.0/16 \
+  --apiserver-advertise-address "$PRIVATE_IP" \
+  --apiserver-cert-extra-sans "${public_ip}"
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+mkdir -p /home/ubuntu/.kube
+cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+chown -R ubuntu:ubuntu /home/ubuntu/.kube
+
+kubectl apply -f https://github.com/flannel-io/flannel/releases/download/${flannel_version}/kube-flannel.yml
+
+# 온프레는 NFS, DR 은 노드 디스크(EBS)를 쓰는 local-path
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/${local_path_provisioner_version}/deploy/local-path-storage.yaml
+kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+%{ if untaint_master ~}
+kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
+%{ endif ~}
+
+kubectl wait --for=condition=Ready node --all --timeout=600s
+echo "DR_CLUSTER_READY $(date -Is)"
+
+# ---------- MongoDB / mongo-express (온프레 db 네임스페이스와 동일한 구성) ----------
+
+# 비밀번호가 로그에 찍히지 않게
+set +x
+MONGO_PASSWORD=$(aws ssm get-parameter --region "${region}" --name "${mongo_password_parameter}" \
+  --with-decryption --query Parameter.Value --output text)
+
+kubectl create namespace db
+kubectl -n db create secret generic mongodb-root \
+  --from-literal=username=root \
+  --from-literal=password="$MONGO_PASSWORD"
+set -x
+
+kubectl apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: db
+spec:
+  replicas: 1
+  serviceName: mongodb
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:6.0
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef: { name: mongodb-root, key: username }
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mongodb-root, key: password }
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+  volumeClaimTemplates:
+    - metadata:
+        name: mongodb-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: db
+spec:
+  type: NodePort
+  selector:
+    app: mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+      nodePort: 30017
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-express
+  namespace: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo-express
+  template:
+    metadata:
+      labels:
+        app: mongo-express
+    spec:
+      containers:
+        - name: mongo-express
+          image: mongo-express:latest
+          ports:
+            - containerPort: 8081
+          env:
+            - name: ME_CONFIG_MONGODB_SERVER
+              value: mongodb.db.svc.cluster.local
+            - name: ME_CONFIG_MONGODB_PORT
+              value: "27017"
+            - name: ME_CONFIG_MONGODB_ENABLE_ADMIN
+              value: "true"
+            - name: ME_CONFIG_MONGODB_AUTH_DATABASE
+              value: admin
+            - name: ME_CONFIG_MONGODB_ADMINUSERNAME
+              valueFrom:
+                secretKeyRef: { name: mongodb-root, key: username }
+            - name: ME_CONFIG_MONGODB_ADMINPASSWORD
+              valueFrom:
+                secretKeyRef: { name: mongodb-root, key: password }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-express
+  namespace: db
+spec:
+  type: NodePort
+  selector:
+    app: mongo-express
+  ports:
+    - port: 8081
+      targetPort: 8081
+      nodePort: 30081
+EOF
+
+kubectl -n db rollout status statefulset/mongodb --timeout=900s
+
+set +x
+until kubectl -n db exec mongodb-0 -- mongosh --quiet -u root -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin --eval 'db.adminCommand("ping").ok' >/dev/null 2>&1; do
+  echo "waiting for mongod..."
+  sleep 5
+done
+set -x
+echo "DR_DB_READY $(date -Is)"
+
+# ---------- S3 최신 백업으로 복원 ----------
+
+# 어느 시점 백업인지 기록 (RPO 측정)
+echo "DR_BACKUP_LAST_MODIFIED $(aws s3api head-object --region "${region}" --bucket "${backup_bucket}" --key "${backup_key}" --query LastModified --output text)"
+
+aws s3 cp --region "${region}" "s3://${backup_bucket}/${backup_key}" /tmp/backup.tar.gz
+tar -xzf /tmp/backup.tar.gz -C /tmp ./db-data/mongodb.archive
+
+# admin/config DB 는 제외 (root 계정은 위에서 만든 것 유지)
+set +x
+kubectl -n db exec -i mongodb-0 -- mongorestore --archive --drop \
+  --nsExclude 'admin.*' --nsExclude 'config.*' \
+  -u root -p "$MONGO_PASSWORD" --authenticationDatabase admin \
+  < /tmp/db-data/mongodb.archive
+set -x
+echo "DR_DB_RESTORED $(date -Is)"
+
+# ---------- 추가 매니페스트 (앱, Istio 설정 등) ----------
+# s3://<버킷>/dr-manifests/ 에 YAML 을 올려두면 여기서 apply
+
+mkdir -p /tmp/dr-manifests
+aws s3 cp --region "${region}" "s3://${backup_bucket}/dr-manifests/" /tmp/dr-manifests --recursive || true
+if find /tmp/dr-manifests -name '*.y*ml' | grep -q .; then
+  kubectl apply -R -f /tmp/dr-manifests
+fi
+
+echo "DR_BOOT_DONE $(date -Is)"
