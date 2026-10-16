@@ -205,10 +205,3 @@ aws codebuild start-build --project-name wegovy-dr-recovery \
 - 미리 할당한 EIP는 EC2에 붙어 있지 않아도 요금이 나옵니다 (월 약 $3.6).
 - CodeBuild 역할은 이 리전 안에서 `ec2:*` 권한을 가집니다.
 
-## 남은 작업
-
-- [ ] 온프레 하트비트 CronJob (+ AWS 키 Secret)
-- [ ] DR 인그레스 + `/health` (Route 53 Secondary 헬스체크용)
-- [ ] 페일백: AWS DB → 온프레 복원
-- [ ] Route 53 도메인 정보 입력 후 `enable_route53 = true`
-- [ ] aws-bootstrap apply 및 CodeBuild 수동 실행 테스트
