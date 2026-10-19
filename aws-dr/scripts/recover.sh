@@ -5,7 +5,7 @@
 #   2. 서버 준비: NFS 서버(/data/*) + 앱 이미지(ECR -> 온프레와 같은 이름)  (onprem/scripts/prepare-backup-node.sh)
 #   3. onprem Terraform apply (env/backup.tfvars) -> 네임스페이스, MongoDB, 앱, Prometheus, Istio 등
 #   4. S3 최신 백업으로 MongoDB 복원 (DR 중 한 번만)
-#   5. nginx 를 온프레(WireGuard 터널) -> 로컬 클러스터로 전환
+#   5. nginx 를 로컬 클러스터(30080)로 전환 + reload, 응답 확인
 # 진행 로그: /var/log/wegovy-dr.log  (DR_* 줄의 시각으로 RTO 측정)
 set -euo pipefail
 exec > >(tee -a /var/log/wegovy-dr.log) 2>&1
@@ -16,8 +16,7 @@ export PATH=$PATH:/usr/local/bin:/usr/local/sbin
 # shellcheck source=lib-terraform.sh
 source "$SRC_DIR/aws-dr/scripts/lib-terraform.sh"
 
-NGINX_CONF=/etc/nginx/conf.d/alpaca-proxy.conf
-NGINX_BACKUP=/etc/nginx/dr-backup/alpaca-proxy.conf.onprem
+NGINX_BACKUP_DIR=/etc/nginx/dr-backup
 ONPREM_UPSTREAM=10.200.0.2:30080
 FRONTEND_NODEPORT=30080
 STATE_DIR=/var/lib/wegovy-dr
@@ -82,16 +81,22 @@ for d in $(kubectl -n app get deployment -o name); do
 done
 log DR_APPS_READY
 
-# ---------- 5. nginx: 온프레 터널 -> 로컬 클러스터 ----------
-NODE_IP=$(node_ip)
-
-# 원본은 conf.d 밖에 보관 (nginx 가 읽지 않는 위치, 페일백 때 이 파일로 되돌림)
-mkdir -p "$(dirname "$NGINX_BACKUP")"
-[ -f "$NGINX_BACKUP" ] || cp "$NGINX_CONF" "$NGINX_BACKUP"
-sed -i "s#$ONPREM_UPSTREAM#$NODE_IP:$FRONTEND_NODEPORT#g" "$NGINX_CONF"
+# ---------- 5. nginx: 로컬 클러스터로 ----------
+# 현재 EC2Backup nginx(conf.d/alpaca-secondary.conf, 팀원 관리)는 항상 로컬 127.0.0.1:30080 을 가리킴 -> reload 로 반영
+# 온프레 터널(10.200.0.2:30080)을 가리키는 설정이 남아 있으면 로컬로 바꾸고 원본은 conf.d 밖에 보관 (페일백 때 되돌림)
+mkdir -p "$NGINX_BACKUP_DIR"
+for f in /etc/nginx/conf.d/*.conf; do
+  grep -q "$ONPREM_UPSTREAM" "$f" || continue
+  [ -f "$NGINX_BACKUP_DIR/$(basename "$f").onprem" ] || cp "$f" "$NGINX_BACKUP_DIR/$(basename "$f").onprem"
+  sed -i "s#$ONPREM_UPSTREAM#127.0.0.1:$FRONTEND_NODEPORT#g" "$f"
+done
 nginx -t
 systemctl reload nginx
-log DR_TRAFFIC_LOCAL
+sleep 2
 
-echo "frontend 응답: $(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$NODE_IP:$FRONTEND_NODEPORT/api/health" || true)"
+# nginx 를 거쳐 DR 앱이 응답하는지 (Route 53 Secondary 헬스체크와 같은 경로)
+code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Host: alpaca.ktproject.cloud" http://127.0.0.1/api/health || true)
+echo "nginx 경유 DR 앱 응답: $code"
+[ "$code" = "200" ]
+log DR_TRAFFIC_LOCAL
 log DR_RECOVER_DONE

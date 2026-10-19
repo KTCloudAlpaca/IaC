@@ -16,6 +16,7 @@ REGION=ap-northeast-2
 BUCKET=k8s-hybrid-dr-backup-2026-995342110514-ap-northeast-2-an
 CODEBUILD_PROJECT=wegovy-dr-recovery
 DR_PUBLIC_IP=43.200.208.156
+PRIMARY_IP=43.202.217.158
 MONGO_PASSWORD_PARAMETER=/wegovy/dr/mongo-root-password
 APP_NAMESPACE=app
 APP_DEPLOYMENTS=(backend frontend)
@@ -139,10 +140,12 @@ STEP=6
 log "6. DR 서버 nginx 원복 + DR 환경 destroy (삭제 확인은 DR 서버에서 함께 수행)"
 run_codebuild failback-finish
 
-# DR 서버 nginx 가 다시 온프레로 전달하는지 (온프레 앱 응답이 돌아와야 함)
-code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Host: alpaca.ktproject.cloud" "http://$DR_PUBLIC_IP/api/health" || true)
-log "   DR 서버 경유 응답: $code (200 이면 온프레로 전달 중)"
+# Route 53 Primary 헬스체크 경로(중계서버 -> 온프레)가 정상이어야 트래픽이 온프레로 돌아옴
+code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Host: alpaca.ktproject.cloud" "http://$PRIMARY_IP/primary-health" || true)
+log "   온프레(Primary) 헬스체크: $code (200 이어야 함)"
 [ "$code" = "200" ]
+# DR 앱이 지워졌으므로 Secondary 는 응답 없음(502 등)이 정상
+log "   DR(Secondary) 헬스체크: $(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Host: alpaca.ktproject.cloud" "http://$DR_PUBLIC_IP/secondary-health" || true) (DR 앱 삭제됨 -> 200 이 아니면 정상)"
 
 STEP=done
 log "페일백 완료 (ID: $FAILBACK_ID)"

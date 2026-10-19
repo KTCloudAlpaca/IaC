@@ -17,8 +17,7 @@ export PATH=$PATH:/usr/local/bin:/usr/local/sbin
 # shellcheck source=lib-terraform.sh
 source "$SRC_DIR/aws-dr/scripts/lib-terraform.sh"
 
-NGINX_CONF=/etc/nginx/conf.d/alpaca-proxy.conf
-NGINX_BACKUP=/etc/nginx/dr-backup/alpaca-proxy.conf.onprem
+NGINX_BACKUP_DIR=/etc/nginx/dr-backup
 STATE_DIR=/var/lib/wegovy-dr
 NAMESPACES="ai app db monitor"
 
@@ -26,14 +25,21 @@ log() { echo "$1 $(date -Is)"; }
 log DR_FAILBACK_FINISH_START
 
 # ---------- 1. nginx 원복 ----------
-if [ -f "$NGINX_BACKUP" ]; then
-  cp "$NGINX_BACKUP" "$NGINX_CONF"
+# recover.sh 가 온프레 터널 설정을 로컬로 바꿨던 경우에만 원본으로 되돌림
+# (현재 팀원 설정 alpaca-secondary.conf 는 원래 로컬을 가리키므로 그대로 둠)
+restored=0
+for b in "$NGINX_BACKUP_DIR"/*.onprem; do
+  [ -f "$b" ] || continue
+  cp "$b" "/etc/nginx/conf.d/$(basename "$b" .onprem)"
+  rm -f "$b"
+  restored=1
+done
+if [ "$restored" = 1 ]; then
   nginx -t
   systemctl reload nginx
-  rm -f "$NGINX_BACKUP"
   log DR_TRAFFIC_ONPREM
 else
-  echo "nginx 원본 백업이 없음 - 전환된 적 없음, 건너뜀"
+  echo "원복할 nginx 설정 없음 (로컬을 가리키는 설정 유지)"
 fi
 
 # ---------- 2. 복원 표시 삭제 ----------
