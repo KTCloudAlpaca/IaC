@@ -25,6 +25,9 @@ log "1. NFS 서버"
 dnf install -y -q nfs-utils
 mkdir -p /data/mongodb /data/mongodb-logs /data/prometheus /data/prometheus-logs /etc/exports.d
 chmod 777 /data/mongodb /data/mongodb-logs
+# root_squash 공유라 CSI 드라이버가 nobody 로 접근 -> 온프레 master 와 같은 소유자/권한
+chown nobody:nobody /data/prometheus-logs
+chmod 770 /data/prometheus-logs
 cat > /etc/exports.d/k8s.exports <<CONF
 /data/mongodb         $NODE_IP(rw,sync,no_subtree_check,no_root_squash)
 /data/mongodb-logs    $NODE_IP(rw,sync,no_subtree_check)
