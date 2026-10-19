@@ -93,6 +93,3 @@ recover.sh가 DR 서버에서 바꾸는 것:
 | 복원 표시 `/var/lib/wegovy-dr/restored` | 삭제 (안 지우면 다음 장애 때 복원을 건너뜀) |
 | DR 중 쌓인 데이터 (k3s `db/mongodb-0`) | `mongodump`로 꺼내 온프레에 복원 |
 
-## 주의 사항
-
-- DR 서버는 단일 노드(k3s)입니다. RTO와 비용을 위해 다이어그램의 master 3대 구성에서 의도적으로 단순화했습니다.
