@@ -1,11 +1,7 @@
-# DR 진입점 공인 IP. 미리 잡아두고 aws-dr 이 EC2 에 연결만 함
-# -> Secondary 레코드를 장애 전에 만들어 둘 수 있음
-resource "aws_eip" "dr" {
-  domain = "vpc"
-
-  tags = {
-    Name = "${var.project}-dr-ingress"
-  }
+# DR 진입점 공인 IP. 팀원이 만든 EIP (EC2Backup 에 연결, Route 53 Secondary 대상)
+# Terraform 은 참조만 하고 만들거나 지우지 않음
+data "aws_eip" "dr" {
+  public_ip = var.dr_public_ip
 }
 
 # ---------- Failover (enable_route53 = true 일 때만) ----------
@@ -33,7 +29,7 @@ resource "aws_route53_health_check" "primary" {
 resource "aws_route53_health_check" "secondary" {
   count = var.enable_route53 ? 1 : 0
 
-  ip_address        = aws_eip.dr.public_ip
+  ip_address        = data.aws_eip.dr.public_ip
   port              = var.health_check_port
   type              = "HTTP"
   resource_path     = var.health_check_path
@@ -68,7 +64,7 @@ resource "aws_route53_record" "secondary" {
   name            = var.record_name
   type            = "A"
   ttl             = 60
-  records         = [aws_eip.dr.public_ip]
+  records         = [data.aws_eip.dr.public_ip]
   set_identifier  = "aws-dr"
   health_check_id = aws_route53_health_check.secondary[0].id
 

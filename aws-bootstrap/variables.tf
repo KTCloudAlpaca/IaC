@@ -30,40 +30,35 @@ variable "mongo_root_password" {
   sensitive   = true
 }
 
+# ---------- ECR ----------
+
+variable "app_images" {
+  type        = list(string)
+  description = "ECR 저장소를 만들 앱 이미지 이름 (온프레 이미지 이름과 같게)"
+  default     = ["launcher-frontend", "launcher-backend"]
+}
+
 # ---------- 하트비트 / 알람 ----------
 
-variable "heartbeat_namespace" {
+variable "heartbeat_alarm_name" {
   type        = string
-  description = "온프레 CronJob이 PutMetricData 할 CloudWatch 네임스페이스"
-  default     = "Wegovy/DR"
+  description = "팀원이 만든 하트비트 알람 이름 (OK -> ALARM 이 되면 DR 복구 시작)"
+  default     = "EC2-trigger-alarm"
 }
 
-variable "heartbeat_metric_name" {
-  type    = string
-  default = "Heartbeat"
-}
-
-variable "cluster_name" {
-  type        = string
-  description = "하트비트 메트릭의 Cluster 디멘션 값"
-  default     = "onprem"
-}
-
-variable "alarm_evaluation_periods" {
-  type        = number
-  description = "하트비트가 몇 분(1분 단위) 연속 끊기면 장애로 판단할지"
-  default     = 3
-}
-
-# ---------- CodeBuild ----------
-
-variable "terraform_version" {
-  type        = string
-  description = "CodeBuild에서 설치할 Terraform 버전 (aws-dr 실행용)"
-  default     = "1.16.5"
+variable "auto_recovery_enabled" {
+  type        = bool
+  description = "true 면 알람 OK -> ALARM 시 자동으로 DR 복구 실행. 하트비트가 안정적으로 들어오기 전에는 false"
+  default     = false
 }
 
 # ---------- Route 53 ----------
+
+variable "dr_public_ip" {
+  type        = string
+  description = "DR 진입점 EIP (Route 53 Secondary 레코드 값과 같아야 함)"
+  default     = "43.200.208.156"
+}
 
 variable "enable_route53" {
   type        = bool

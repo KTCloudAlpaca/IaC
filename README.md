@@ -7,7 +7,7 @@
 | 폴더 | 역할 | 실행 |
 | --- | --- | --- |
 | [onprem/](onprem/) | 온프레 Kubernetes 리소스 (네임스페이스, MongoDB, Prometheus) | 사람 |
-| [aws-bootstrap/](aws-bootstrap/) | 알람, EventBridge, CodeBuild, IAM, ECR 등 사전 준비 | 사람 (1회) |
+| [aws-bootstrap/](aws-bootstrap/) | EventBridge, CodeBuild, IAM, ECR 등 사전 준비 | 사람 (1회) |
 | [aws-dr/](aws-dr/) | DR 복구 스크립트와 앱 YAML (`recovery.zip`으로 올라감) | CodeBuild |
 
 Terraform 명령은 **각 폴더 안에서** 실행합니다.
@@ -15,8 +15,8 @@ Terraform 명령은 **각 폴더 안에서** 실행합니다.
 ## 복구 흐름
 
 ```
-온프레 하트비트 끊김 (3분)
-  → CloudWatch Alarm (OK → ALARM)
+온프레 하트비트 끊김 (5분)
+  → 팀원 알람 EC2-trigger-alarm (OK → ALARM)
   → EventBridge → CodeBuild
   → SSM Run Command 로 DR 서버(EC2Backup)에서 recover.sh 실행
       k3s 기동 → MongoDB 배포 → S3 최신 백업 복원 → 앱 배포(ECR 이미지) → nginx 로컬 전환
@@ -50,8 +50,8 @@ terraform apply   # terraform.tfvars 에 mongo_root_password (온프레와 같�
 
 - 계정 `995342110514`가 아니면 실행이 막힙니다.
 - `aws-dr/`을 수정했으면 다시 `apply` 해야 S3의 `recovery.zip`과 `dr-manifests/`가 갱신됩니다.
-- 온프레 하트비트용 키: `terraform output -raw onprem_access_key_id` / `onprem_secret_access_key`
-- 하트비트 형식: `aws cloudwatch put-metric-data --namespace Wegovy/DR --metric-name Heartbeat --dimensions Cluster=onprem --value 1`
+- 하트비트와 알람은 팀원이 만든 것을 씁니다 (`OnPrem/Kubernetes` / `Heartbeat` / `Cluster=onprem-k8s`, 알람 `EC2-trigger-alarm`). Terraform은 알람을 참조만 하며, 알람 이름이 바뀌면 `heartbeat_alarm_name` 변수도 바꿔야 합니다.
+- **자동 복구는 기본으로 꺼져 있습니다** (`auto_recovery_enabled = false`). 하트비트가 꾸준히 들어오는 걸 확인한 뒤 `terraform.tfvars`에 `auto_recovery_enabled = true`를 넣고 다시 `apply` 합니다.
 
 ## 앱 이미지 ECR 업로드
 
@@ -81,7 +81,7 @@ aws codebuild start-build --project-name wegovy-dr-recovery
 ```
 
 > **실제로 nginx가 DR 서버로 전환됩니다.** 테스트 후에는 아래 페일백 내용대로 되돌려야 합니다.
-> 자동 실행은 알람이 **OK → ALARM**으로 바뀔 때만 일어납니다. 하트비트가 한 번도 안 들어왔으면 자동 복구도 안 됩니다.
+> 자동 실행은 `EC2-trigger-alarm`이 **OK → ALARM**으로 바뀔 때만 일어납니다. 하트비트가 꾸준히 들어와 알람이 OK 상태여야 자동 복구가 동작합니다.
 
 ## 페일백 담당자 인수인계
 
