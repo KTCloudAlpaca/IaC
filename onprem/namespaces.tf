@@ -15,9 +15,6 @@ resource "kubernetes_namespace_v1" "this" {
 
   metadata {
     name = each.key
-    labels = {
-      project = "server-wegovy"
-    }
   }
 
   # 실수로 destroy 해도 네임스페이스가 삭제되지 않도록 막음

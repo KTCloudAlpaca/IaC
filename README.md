@@ -34,10 +34,20 @@ terraform init
 terraform apply   # terraform.tfvars 에 mongo_root_password 필요
 ```
 
-- 팀원이 만든 리소스를 `import` 블록으로 가져와 관리합니다. MongoDB용 NFS PVC는 관리 대상이 아니며 미리 있어야 합니다.
-- 클러스터에 NFS CSI 드라이버(`nfs.csi.k8s.io`)가 필요합니다. NFS StorageClass는 `Retain`이라 PVC를 지워도 데이터가 남습니다.
-- 네임스페이스는 `prevent_destroy`라 `destroy`로 지워지지 않습니다.
-- Prometheus는 아직 영구 저장소가 없습니다. 이후 `nfs-prometheus` StorageClass로 연결할 예정입니다.
+팀원이 `kubectl` / `helm`으로 만든 리소스를 `import` 블록으로 가져와 관리합니다. 코드는 실제 클러스터와 같게 맞춰져 있습니다.
+
+| 파일 | 관리 대상 |
+| --- | --- |
+| [namespaces.tf](onprem/namespaces.tf) | 네임스페이스 `ai`, `app`, `db`, `monitor` (`prevent_destroy`) |
+| [app.tf](onprem/app.tf) | frontend / backend Deployment·Service, `backend-secret` |
+| [database.tf](onprem/database.tf) | MongoDB StatefulSet·Service, mongo-express |
+| [prometheus.tf](onprem/prometheus.tf) | kube-prometheus-stack (15일 보관, `nfs-prometheus` 5Gi), NFS StorageClass 2개, 로그 PVC |
+| [logging.tf](onprem/logging.tf) | Prometheus 로그 수집기 (fluent-bit DaemonSet) |
+
+- 첫 `apply`는 리소스를 가져오기만 합니다. `wait_for_*` 같은 Terraform 전용 값과 Helm 기록(revision +1)만 바뀌고 파드는 재시작되지 않습니다.
+- 클러스터를 `kubectl`로 직접 바꾸면 코드와 달라집니다. 바꿀 때는 코드도 같이 고치고 `plan`으로 확인하세요.
+- **IaC 범위 밖:** Istio, MetalLB, Flannel, NFS CSI 드라이버(클러스터 기반 설치), MongoDB용 PV/PVC, `dr-backup-cronjob`, 하트비트 크론(호스트 crontab)
+- 페일백 스크립트: [onprem/scripts/failback.sh](onprem/scripts/failback.sh) (아래 페일백 참고)
 
 ## aws-bootstrap
 
