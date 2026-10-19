@@ -1,5 +1,6 @@
 #!/bin/bash
-# CodeBuild 에서 실행: DR 서버(EC2Backup)에 SSM Run Command 로 스크립트를 보내고 끝날 때까지 기다림
+# CodeBuild 에서 실행: DR 서버(EC2Backup)에 SSM Run Command 로 스크립트 실행을 지시하고 끝날 때까지 기다림
+#   DR 서버가 S3 의 recovery.zip(aws-dr/ + onprem/) 을 직접 받아서 /opt/wegovy-dr/src 에 풀고 실행
 #   DR_ACTION=recover         : 장애 시 복구 (기본값, EventBridge)
 #   DR_ACTION=failback-export : 페일백 - DR 앱 중지 + DB 덤프 (FAILBACK_ID 필요)
 #   DR_ACTION=failback-finish : 페일백 - nginx 원복 + 정리
@@ -8,9 +9,9 @@
 set -euo pipefail
 
 case "${DR_ACTION:-recover}" in
-  recover)         SCRIPT=scripts/recover.sh ;;
-  failback-export) SCRIPT=scripts/failback-export.sh ;;
-  failback-finish) SCRIPT=scripts/failback-finish.sh ;;
+  recover)         SCRIPT=aws-dr/scripts/recover.sh ;;
+  failback-export) SCRIPT=aws-dr/scripts/failback-export.sh ;;
+  failback-finish) SCRIPT=aws-dr/scripts/failback-finish.sh ;;
   *) echo "알 수 없는 DR_ACTION: '$DR_ACTION'"; exit 1 ;;
 esac
 echo "DR_ACTION=${DR_ACTION:-recover} ($SCRIPT)"
@@ -24,10 +25,15 @@ if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
 fi
 echo "DR 서버: $INSTANCE_ID ($DR_PUBLIC_IP)"
 
-# 스크립트를 base64 로 넘겨서 원격에서 그대로 실행
-ENV_VARS=$(printf 'BACKUP_BUCKET=%q BACKUP_KEY=%q MONGO_PASSWORD_PARAMETER=%q ECR_REGISTRY=%q APP_IMAGES=%q FAILBACK_ID=%q AWS_REGION=%q' \
-  "$BACKUP_BUCKET" "$BACKUP_KEY" "$MONGO_PASSWORD_PARAMETER" "$ECR_REGISTRY" "$APP_IMAGES" "${FAILBACK_ID:-}" "$AWS_REGION")
-REMOTE_CMD="echo $(base64 -w0 "$SCRIPT") | base64 -d > /tmp/wegovy-dr.sh && $ENV_VARS bash /tmp/wegovy-dr.sh"
+# DR 서버에서: recovery.zip 다운로드 -> 압축 해제 -> 스크립트 실행 (명령이 짧아서 SSM 전송 크기 제한과 무관)
+SRC_DIR=/opt/wegovy-dr/src
+ENV_VARS=$(printf 'SRC_DIR=%q BACKUP_BUCKET=%q BACKUP_KEY=%q MONGO_PASSWORD_PARAMETER=%q ECR_REGISTRY=%q APP_IMAGES=%q FAILBACK_ID=%q AWS_REGION=%q' \
+  "$SRC_DIR" "$BACKUP_BUCKET" "$BACKUP_KEY" "$MONGO_PASSWORD_PARAMETER" "$ECR_REGISTRY" "$APP_IMAGES" "${FAILBACK_ID:-}" "$AWS_REGION")
+REMOTE_CMD="set -e
+rm -rf $SRC_DIR && mkdir -p $SRC_DIR
+aws s3 cp --only-show-errors --region $AWS_REGION s3://$BACKUP_BUCKET/recovery.zip $SRC_DIR.zip
+python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' $SRC_DIR.zip $SRC_DIR
+$ENV_VARS bash $SRC_DIR/$SCRIPT"
 PARAMS=$(python3 -c 'import json, sys; print(json.dumps({"commands": [sys.argv[1]], "executionTimeout": ["3600"]}))' "$REMOTE_CMD")
 
 COMMAND_ID=$(aws ssm send-command \

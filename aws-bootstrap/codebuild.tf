@@ -13,8 +13,9 @@ resource "aws_codebuild_project" "dr" {
 
   # CodeBuild 가 zip 을 내려받아 자동으로 풀고, zip 안의 buildspec.yml 실행
   source {
-    type     = "S3"
-    location = "${data.aws_s3_bucket.dr.id}/${aws_s3_object.recovery.key}"
+    type      = "S3"
+    location  = "${data.aws_s3_bucket.dr.id}/${aws_s3_object.recovery.key}"
+    buildspec = "aws-dr/buildspec.yml"
   }
 
   artifacts {

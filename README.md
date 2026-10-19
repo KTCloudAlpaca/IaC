@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | [onprem/](onprem/) | 온프레 Kubernetes 환경 전체. **같은 코드로 백업 EC2 에도 똑같이 구축** | 사람 |
 | [aws-bootstrap/](aws-bootstrap/) | EventBridge, CodeBuild, IAM, ECR 등 사전 준비 | 사람 (1회) |
-| [aws-dr/](aws-dr/) | DR 복구/페일백 스크립트 (`recovery.zip`으로 올라감) | CodeBuild |
+| [aws-dr/](aws-dr/) | DR 복구/페일백 스크립트 (`onprem/`과 함께 `recovery.zip`으로 올라감) | CodeBuild |
 
 Terraform 명령은 **각 폴더 안에서** 실행합니다.
 
@@ -18,9 +18,10 @@ Terraform 명령은 **각 폴더 안에서** 실행합니다.
 온프레 하트비트 끊김 (5분)
   → 팀원 알람 EC2-trigger-alarm (OK → ALARM)
   → EventBridge → CodeBuild
-  → SSM Run Command 로 DR 서버(EC2Backup)에서 recover.sh 실행
-      (온프레와 같은 환경이 미리 구축되어 있음)
-      앱 이미지 최신화(ECR) → S3 최신 백업으로 MongoDB 복원 → 앱 재시작 → nginx 로컬 전환
+  → SSM Run Command 로 DR 서버(EC2Backup)에서 recover.sh 실행 (평소엔 쿠버네티스만 설치된 상태)
+      S3 recovery.zip 다운로드 → NFS 서버·앱 이미지(ECR) 준비
+      → onprem Terraform apply (env/backup.tfvars) 로 온프레와 같은 환경 생성
+      → S3 최신 백업으로 MongoDB 복원 → nginx 로컬 전환
   → Route 53 이 Secondary(43.200.208.156)로 트래픽 전환
 ```
 
@@ -58,6 +59,8 @@ terraform apply   # terraform.tfvars 에 mongo_root_password 필요
 
 **백업 EC2 에 같은 환경 구축**
 
+장애 시에는 recover.sh 가 아래와 같은 일을 DR 서버 안에서 자동으로 합니다 (state: DR 서버 `/opt/wegovy-dr/terraform`). 직접 테스트할 때만 아래처럼 수동으로 실행합니다.
+
 ```bash
 # 1. EC2Backup 에서: NFS 서버(/data/*) + 앱 이미지(ECR → 온프레와 같은 이름)
 sudo bash prepare-backup-node.sh      # onprem/scripts/prepare-backup-node.sh
@@ -74,6 +77,7 @@ terraform apply -var-file=env/backup.tfvars
 - 쿠버네티스 자체는 EC2Backup 에 미리 설치되어 있어야 합니다 (현재 kubeadm v1.31.14 + Calico 설치됨).
 - 온프레와 다른 점: 쿠버네티스 버전/CNI(온프레 1.36.3 + Flannel), 노드 1대(master 에도 파드 배치), MetalLB 없음(AWS VPC 에서 L2 미동작, nginx 가 대신함).
 - Prometheus + Istio 까지 올리므로 **메모리 8GB(t3.large) 이상**이 필요합니다.
+- 수동으로 만든 환경은 master 의 `backup` workspace state 에 기록됩니다. 장애 시 자동으로 만든 환경(DR 서버 state)과 섞이지 않도록, 수동 테스트 후에는 `terraform destroy` 로 정리하세요 (네임스페이스는 `prevent_destroy` 라 `terraform state rm` 후 `kubectl delete ns`).
 - 클러스터를 `kubectl`로 직접 바꾸면 코드와 달라집니다. 바꿀 때는 코드도 같이 고치고 `plan`으로 확인하세요.
 - **IaC 범위 밖:** `dr-backup-cronjob`, 하트비트 크론(호스트 crontab)
 
@@ -98,10 +102,11 @@ terraform apply   # terraform.tfvars 에 mongo_root_password (온프레와 같�
 
 ## DR 서버(EC2Backup) 준비
 
-위 "백업 EC2 에 같은 환경 구축"을 먼저 끝내야 복구가 동작합니다. IAM 역할 `EC2-S3-DR-Relay-Role`에 아래 정책이 필요합니다.
+평소에는 **쿠버네티스만 설치된 상태**로 두면 됩니다. 장애 시 recover.sh 가 환경을 만들고, 페일백 시 failback-finish.sh 가 다시 지웁니다. IAM 역할 `EC2-S3-DR-Relay-Role`에 아래 정책이 필요합니다.
 
 - `AmazonSSMManagedInstanceCore`: CodeBuild 명령 수신, MongoDB 비밀번호 조회
 - `AmazonEC2ContainerRegistryReadOnly`: ECR 이미지 받기
+- `AmazonS3FullAccess`(현재 붙어 있음): recovery.zip·백업 다운로드, 페일백 덤프 업로드
 
 복구 로그는 DR 서버의 `/var/log/wegovy-dr.log`에 남습니다. `DR_*` 줄의 시각으로 RTO를, `DR_BACKUP_LAST_MODIFIED`로 RPO를 계산합니다.
 
@@ -129,7 +134,7 @@ AWS_PROFILE=wegovy ./onprem/scripts/failback.sh
 | 3 | 온프레 현재 DB 스냅샷 → S3 `failback/onprem-before-<ID>.archive` | 〃 |
 | 4 | DR 앱 중지 + DR DB 덤프 → S3 `failback/dr-<ID>.archive` (**서비스 중단 시작**) | CodeBuild → [failback-export.sh](aws-dr/scripts/failback-export.sh) |
 | 5 | 온프레에 복원 → 온프레 앱 시작 → Route 53 이 온프레로 전환 (**서비스 재개**) | [onprem/scripts/failback.sh](onprem/scripts/failback.sh) |
-| 6 | DR 서버 nginx 원복, 복원 표시 삭제, DR 앱을 다시 대기 상태로 | CodeBuild → [failback-finish.sh](aws-dr/scripts/failback-finish.sh) |
+| 6 | DR 서버 nginx 원복, 복원 표시 삭제, DR 환경 삭제 (쿠버네티스만 남김) | CodeBuild → [failback-finish.sh](aws-dr/scripts/failback-finish.sh) |
 
 - 온프레 앱은 **복원이 끝난 뒤에** 올립니다. 먼저 올리면 Route 53 이 장애 이전 데이터로 트래픽을 돌려보냅니다.
 - 실패하면 몇 단계에서 멈췄는지와 다음 조치를 출력합니다. 문제가 있으면 `onprem-before-<ID>.archive`로 온프레 DB를 되돌릴 수 있습니다.

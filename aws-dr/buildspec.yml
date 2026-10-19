@@ -1,4 +1,4 @@
-# CodeBuild 가 recovery.zip(= aws-dr/) 을 풀고 실행 (장애 시 EventBridge 가 시작)
+# CodeBuild 가 recovery.zip(aws-dr/ + onprem/) 을 풀고 실행 (장애 시 EventBridge 가 시작)
 version: 0.2
 
 env:
@@ -7,4 +7,4 @@ env:
 phases:
   build:
     commands:
-      - bash ci/run-on-dr.sh
+      - bash aws-dr/ci/run-on-dr.sh
