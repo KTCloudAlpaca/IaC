@@ -1,6 +1,7 @@
 # recovery.zip(= aws-dr/) 을 소스로 받아 DR 서버(EC2Backup)에 SSM Run Command 로 recover.sh 실행
-#   장애:   EventBridge 가 시작
+#   장애:   EventBridge 가 시작 (DR_ACTION=recover)
 #   테스트: aws codebuild start-build --project-name <이름>
+#   페일백: onprem/scripts/failback.sh 가 DR_ACTION=failback-export / failback-finish 로 시작
 resource "aws_codebuild_project" "dr" {
   name          = "${var.project}-dr-recovery"
   description   = "온프레 장애 시 DR 서버에서 복구 스크립트 실행"
@@ -24,6 +25,12 @@ resource "aws_codebuild_project" "dr" {
     type         = "LINUX_CONTAINER"
     compute_type = "BUILD_GENERAL1_SMALL"
     image        = "aws/codebuild/amazonlinux-x86_64-standard:5.0"
+
+    # recover | failback-export | failback-finish (aws-dr/ci/run-on-dr.sh)
+    environment_variable {
+      name  = "DR_ACTION"
+      value = "recover"
+    }
 
     # 이 IP 가 붙어 있는 인스턴스를 DR 서버로 사용
     environment_variable {

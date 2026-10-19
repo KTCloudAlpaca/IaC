@@ -1,10 +1,19 @@
 #!/bin/bash
-# CodeBuild 에서 실행: DR 서버(EC2Backup)에 SSM Run Command 로 recover.sh 를 보내고 끝날 때까지 기다림
+# CodeBuild 에서 실행: DR 서버(EC2Backup)에 SSM Run Command 로 스크립트를 보내고 끝날 때까지 기다림
+#   DR_ACTION=recover         : 장애 시 복구 (기본값, EventBridge)
+#   DR_ACTION=failback-export : 페일백 - DR 앱 중지 + DB 덤프 (FAILBACK_ID 필요)
+#   DR_ACTION=failback-finish : 페일백 - nginx 원복 + 정리
 # 필요한 환경변수 (aws-bootstrap 의 CodeBuild 프로젝트가 넣어줌)
-#   DR_PUBLIC_IP, BACKUP_BUCKET, BACKUP_KEY, MONGO_PASSWORD_PARAMETER, ECR_REGISTRY, AWS_REGION
+#   DR_ACTION, DR_PUBLIC_IP, BACKUP_BUCKET, BACKUP_KEY, MONGO_PASSWORD_PARAMETER, ECR_REGISTRY, AWS_REGION
 set -euo pipefail
 
-SCRIPT=scripts/recover.sh
+case "${DR_ACTION:-recover}" in
+  recover)         SCRIPT=scripts/recover.sh ;;
+  failback-export) SCRIPT=scripts/failback-export.sh ;;
+  failback-finish) SCRIPT=scripts/failback-finish.sh ;;
+  *) echo "알 수 없는 DR_ACTION: '$DR_ACTION'"; exit 1 ;;
+esac
+echo "DR_ACTION=${DR_ACTION:-recover} ($SCRIPT)"
 
 # Route 53 Secondary IP 가 붙어 있는 인스턴스 = DR 서버 (인스턴스를 다시 만들어도 따라감)
 INSTANCE_ID=$(aws ec2 describe-addresses --public-ips "$DR_PUBLIC_IP" \
@@ -16,15 +25,15 @@ fi
 echo "DR 서버: $INSTANCE_ID ($DR_PUBLIC_IP)"
 
 # 스크립트를 base64 로 넘겨서 원격에서 그대로 실행
-ENV_VARS=$(printf 'BACKUP_BUCKET=%q BACKUP_KEY=%q MONGO_PASSWORD_PARAMETER=%q ECR_REGISTRY=%q AWS_REGION=%q' \
-  "$BACKUP_BUCKET" "$BACKUP_KEY" "$MONGO_PASSWORD_PARAMETER" "$ECR_REGISTRY" "$AWS_REGION")
+ENV_VARS=$(printf 'BACKUP_BUCKET=%q BACKUP_KEY=%q MONGO_PASSWORD_PARAMETER=%q ECR_REGISTRY=%q FAILBACK_ID=%q AWS_REGION=%q' \
+  "$BACKUP_BUCKET" "$BACKUP_KEY" "$MONGO_PASSWORD_PARAMETER" "$ECR_REGISTRY" "${FAILBACK_ID:-}" "$AWS_REGION")
 REMOTE_CMD="echo $(base64 -w0 "$SCRIPT") | base64 -d > /tmp/wegovy-dr.sh && $ENV_VARS bash /tmp/wegovy-dr.sh"
 PARAMS=$(python3 -c 'import json, sys; print(json.dumps({"commands": [sys.argv[1]], "executionTimeout": ["3600"]}))' "$REMOTE_CMD")
 
 COMMAND_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name AWS-RunShellScript \
-  --comment "wegovy DR recover" \
+  --comment "wegovy DR ${DR_ACTION:-recover}" \
   --parameters "$PARAMS" \
   --query Command.CommandId --output text)
 echo "SSM CommandId: $COMMAND_ID"
