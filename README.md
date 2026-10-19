@@ -1,207 +1,108 @@
-# server-wegovy-terraform
+# Kubernetes DR Failback Automation (Terraform add-on)
 
-온프레미스 Kubernetes 장애를 감지해 AWS에 DR 클러스터를 자동으로 띄우는 **Hybrid Cloud DR** 프로젝트의 Terraform 코드입니다.
+이 패키지는 `KTCloudAlpaca/IaC`의 기존 구조에 추가하는 **참고 구현**입니다. 기존 `onprem/`, `aws-bootstrap/`, `aws-dr/`의 Terraform state를 합치지 않습니다.
 
-## 구조
+- AWS `CodeBuild + SSM Run Command`: AWS DR의 쓰기 워크로드를 멈추고 MongoDB 최종 논리 백업을 S3에 게시
+- On-premises Kubernetes `CronJob`: 새 백업 감지 → 현재 온프레미스 DB 롤백용 백업 → 체크섬 검증 → `mongorestore` → DB 확인 → 앱 워크로드 재개
+- S3 `failback/control/active-environment`: `aws-dr`/`onprem` 현재 데이터 원본을 기록
+- On-prem `NodePort 30082 /dr-ready`: S3 marker가 `onprem`일 때만 HTTP 200을 반환해 Route 53 Primary health check를 제어
+- 선택적 EventBridge 규칙: 하트비트 알람이 `ALARM -> OK`로 바뀌면 CodeBuild 시작. 기본값은 비활성화.
 
-| 폴더 | 역할 | 실행 주체 | state |
-| --- | --- | --- | --- |
-| [onprem/](onprem/) | 온프레미스 Kubernetes 리소스 (네임스페이스, MongoDB, Prometheus) | 사람 | 로컬 |
-| [aws-bootstrap/](aws-bootstrap/) | 사전 준비: 알람, EventBridge, CodeBuild, IAM, EIP 등 (1회 apply) | 사람 | 로컬 |
-| [aws-dr/](aws-dr/) | DR 환경: VPC, EC2, Kubernetes, DB 복원 | **CodeBuild만** | S3 |
+## 파일
 
-세 폴더는 state가 따로라서 서로 영향을 주지 않습니다. Terraform 명령은 항상 **각 폴더 안에서** 실행합니다.
+- `aws-bootstrap/failback-automation.tf`: 기존 `aws-bootstrap/`에 추가할 AWS 리소스/IAM
+- `aws-bootstrap/failback-build/buildspec.yml`: CodeBuild가 SSM 명령을 보내고 복구 결과를 기다리는 빌드 단계
+- `aws-dr/templates/failback-export.sh`: AWS MongoDB 최종 백업과 writer pause
+- `aws-dr/templates/failback-resume-aws.sh`: 실패 시 운영자 승인으로 AWS writer를 재개하는 도구
+- `onprem-failback/`: 온프레미스 restore CronJob, 최소 RBAC, PVC, readiness gate를 관리하는 독립 Terraform root
+- `PATCHES.md`: 기존 저장소에 적용해야 할 코드 삽입과 실행 절차
 
-## 자동 복구 흐름
+## 중요: 적용 순서
 
+1. 이 패키지는 팀 저장소에 자동 commit/push하지 않습니다. 먼저 복사한 브랜치에서 `PATCHES.md`를 따라 기존 코드에 통합하세요.
+2. AWS와 On-Prem workload의 쓰기 작업에 `dr-failback-managed=true` label을 붙여야 합니다. Deployment 객체 metadata와 Pod template, CronJob과 Job/Pod template에 label을 빠뜨리지 마세요. MongoDB StatefulSet 자체에는 붙이지 않습니다.
+3. `aws-bootstrap/failback-automation.tf`를 추가하고 `terraform fmt`, `validate`, `plan`을 검토한 뒤 적용합니다.
+4. `aws-dr/compute.tf`와 `master.sh.tftpl`에 helper 설치 부분을 통합합니다. `aws-bootstrap`의 `recovery.zip`이 새 코드로 갱신되도록 `aws-bootstrap`을 재적용합니다. 이미 실행 중인 Master의 user-data는 자동으로 다시 실행되지 않으므로, 테스트 환경을 재생성하거나 helper를 SSM으로 안전하게 배포하세요.
+5. `onprem-failback/terraform.tfvars.example`을 `terraform.tfvars`로 복사해 실제 자격 증명을 넣고 `onprem-failback/` root에서 `terraform init`, `fmt`, `validate`, `plan`을 수행합니다. 실제 `terraform.tfvars`와 `.tfstate`는 Git에 커밋하지 마세요.
+6. Route 53을 사용하는 경우 기존 `route53.tf`에서 Primary health check만 `30082 /dr-ready`로 변경합니다. 온프레미스 엣지 방화벽/NAT가 Route 53 health check 요청을 NodePort 30082까지 전달해야 합니다.
+7. 소규모 테스트 DB에서 먼저 전체 failback drill을 수행하세요. 성공하기 전엔 운영 도메인에 연결하지 마세요.
+
+## 사용법
+
+수동/운영 승인 방식(기본):
+
+```bash
+aws codebuild start-build --project-name wegovy-dr-failback
 ```
-[온프레 하트비트 CronJob] --1분마다 PutMetricData--> CloudWatch 메트릭 (Wegovy/DR / Heartbeat)
-        │ 3분 연속 안 들어옴
-        ▼
-CloudWatch Alarm (OK -> ALARM)
-        ▼
-EventBridge 규칙 --StartBuild (TF_ACTION=apply)--> CodeBuild
-        ▼
-S3 recovery.zip(= aws-dr/) 자동 압축 해제 -> terraform init (S3 backend) -> terraform apply
-        ▼
-EC2 user-data: kubeadm -> MongoDB 배포 -> S3 최신 백업 다운로드 -> mongorestore
-        ▼
-Route 53 Secondary 헬스체크 통과 -> 트래픽 AWS로 전환
-```
 
-## S3 버킷
+`var.project`를 `wegovy`가 아닌 값으로 바꾸었다면 CodeBuild 프로젝트 이름과 `failback_master_tag_value`를 실제 `aws-dr/compute.tf`의 Master `Name` 태그에 맞추세요.
 
-팀이 이미 쓰고 있는 `k8s-hybrid-dr-backup-2026-995342110514-ap-northeast-2-an` 버킷을 사용합니다. Terraform은 이 버킷을 만들거나 지우지 않습니다.
-
-| 경로 | 내용 | 올리는 주체 |
-| --- | --- | --- |
-| `backups/full-cluster-backup.tar.gz` | 최신 백업 (매시간 덮어씀). **DR 복원에 사용** | 팀원 백업 작업 |
-| `backups/full-cluster-backup-YYYYMMDD-HHMM.tar.gz` | 시간별 백업 | 팀원 백업 작업 |
-| `recovery.zip` | `aws-dr/` 압축본 (CodeBuild 소스) | aws-bootstrap apply |
-| `terraform-state/aws-dr.tfstate` | aws-dr state | CodeBuild |
-| `dr-manifests/` | DR 클러스터에 추가로 apply 할 YAML (선택) | 사람 |
-
----
-
-## onprem
-
-팀원이 `kubectl` / `helm`으로 직접 만든 리소스를 `import` 블록으로 가져와 Terraform으로 관리합니다.
-
-| 파일 | 리소스 | 설명 |
-| --- | --- | --- |
-| [namespaces.tf](onprem/namespaces.tf) | `kubernetes_namespace_v1.this` | 네임스페이스 `ai`, `app`, `db`, `monitor` (`prevent_destroy` 적용) |
-| [database.tf](onprem/database.tf) | `kubernetes_stateful_set_v1.mongodb`<br>`kubernetes_service_v1.mongodb` | MongoDB 6.0 StatefulSet (`db` 네임스페이스), NodePort `30017` |
-| [prometheus.tf](onprem/prometheus.tf) | `helm_release.monitoring` | kube-prometheus-stack `92.3.0` (릴리스명 `mymonitor`, `monitor` 네임스페이스) |
-| | `kubernetes_storage_class_v1.nfs_prometheus` | 메트릭 저장용 NFS StorageClass (`10.120.0.140:/data/prometheus`) |
-| | `kubernetes_storage_class_v1.nfs_prometheus_logs` | 로그 저장용 NFS StorageClass (`10.120.0.140:/data/prometheus-logs`) |
-| | `kubernetes_persistent_volume_claim_v1.prometheus_logs` | 로그 저장용 PVC `prometheus-logs-pvc` (2Gi, RWX) |
-
-Helm values는 [values/prometheus.yaml](onprem/values/prometheus.yaml)에서 관리합니다.
-
-> MongoDB가 사용하는 PVC(`mongodb-data-nfs-pvc`, `mongodb-logs-nfs-pvc`)는 Terraform 관리 대상이 아니며, 이미 클러스터에 존재해야 합니다.
-
-**요구 사항**
-
-- Terraform `>= 1.7.0`
-- Provider: `hashicorp/kubernetes >= 2.30`, `hashicorp/helm >= 3.0`
-- 클러스터에 접근 가능한 `~/.kube/config`
-- 클러스터에 NFS CSI 드라이버(`nfs.csi.k8s.io`) 설치
-
-**실행**
-
-`onprem/terraform.tfvars`:
+자동 trigger는 `aws-bootstrap/terraform.tfvars`에 다음을 넣고 충분한 모의 훈련을 한 뒤에만 켭니다.
 
 ```hcl
-mongo_root_password = "<비밀번호>"
+enable_automatic_failback = true
 ```
 
+하트비트 복구만으로는 애플리케이션, NFS, DB, 쓰기 작업이 모두 안전하게 복구되었다는 보장이 없습니다. 따라서 기본값은 `false`입니다.
+
+## 안전 동작과 복구 정책
+
+- AWS에서 마지막 백업을 만들기 전에 label된 writer가 0개이거나 active Job이 있으면 AWS 스크립트는 실패합니다.
+- 백업을 게시하기 전 AWS 스크립트가 실패하면 저장한 replicas/CronJob state로 최대한 원상 복귀합니다.
+- 백업 `READY` marker 게시 후에는 AWS writer를 계속 중지합니다. On-Prem의 성공 보고가 오기 전에는 자동 재개하지 않습니다.
+- On-Prem은 덮어쓰기 전에 `failback/rollback/<run-id>/onprem-before.archive`를 S3에 저장합니다.
+- On-Prem `mongorestore`나 workload 재개 검증이 실패하면 `FAILED` 상태를 게시하고 active-environment를 `aws-dr`로 유지합니다. 자동으로 양쪽 writer를 열지 않습니다.
+- AWS writer 재개 helper는 운영자가 실패 상태와 온프레미스 fencing을 확인한 뒤에만 사용합니다.
+- 데이터 복원 성공 후 AWS DR Terraform을 자동 `destroy`하지 않습니다. 트래픽, DB, 로그, RPO/RTO 확인 후 별도 승인으로 정리하세요.
+
+## MongoDB 관련 전제
+
+- 두 쪽에서 현재 MongoDB 6.0과 logical archive(`mongodump --archive`)를 사용한다고 가정합니다.
+- `mongodump`, `mongorestore`, `mongosh`가 `mongo:6.0` 컨테이너 이미지에 실제로 존재하는지 먼저 확인하세요. 현재 팀의 DR template가 해당 명령을 MongoDB Pod 내부에서 호출하는 기존 동작을 기준으로 삼았습니다. 누락된 경우 공식 MongoDB Database Tools를 포함한 고정 버전 이미지를 사용하세요.
+- `--drop`은 백업에 포함된 컬렉션을 drop한 뒤 복원하지만, 백업에 없는 컬렉션은 제거하지 않습니다. 복원 후 컬렉션 inventory/업무 검증을 추가하세요.
+- 스크립트는 `admin.*`, `config.*`를 제외합니다. 별도 MongoDB 사용자/권한이 있다면 페일백 후에도 검증해야 합니다.
+- 이 구현은 단일 MongoDB 논리 백업을 사용합니다. 쓰기가 계속되는 상태의 zero-downtime replication이나 replica-set failover를 대체하지 않습니다.
+
+## 스토리지와 보안
+
+- `work_storage_size`는 압축 AWS 백업, 해제된 archive, 온프레미스 롤백 archive를 감당해야 합니다. 현재 예제의 30Gi는 예시일 뿐 데이터 크기에 따라 늘리세요.
+- `nfs-prometheus`는 기존 저장소의 실습 기본값일 뿐, DB 백업 staging 용도의 운영용 StorageClass로 권장하는 이름은 아닙니다. 별도 NFS share/StorageClass를 만드는 것이 좋습니다.
+- 현재 on-prem Terraform secret과 Terraform state에 AWS 액세스 키/DB 비밀번호가 기록될 수 있습니다. S3 state 암호화·접근 제한을 적용하고, 운영 환경에서는 장기 IAM user 키 대신 Relay presigned URL 또는 수명이 짧은 자격 증명을 우선 검토하세요.
+- AWS CLI, kubectl, nginx 이미지는 예시 태그를 사용합니다. 운영에서는 버전을 고정하고 가능한 경우 image digest를 pin하세요.
+- NodePort 30082가 인터넷에 직접 열리지 않도록 가능한 범위에서 방화벽 소스를 제한하고, Route 53 Health Check의 공식 IP 범위 변경을 운영 정책에 반영하세요.
+
+## 코드 검증 상태
+
+- `aws-dr/templates/*.sh`는 `bash -n`으로, `onprem-failback/scripts/*.sh`는 `sh -n`으로 shell 구문 검사를 통과했습니다.
+- 작업 환경에 Terraform CLI가 설치되어 있지 않아 Terraform의 `fmt`, `validate`, `plan`은 실행하지 못했습니다. 따라서 이 패키지는 **검토용 통합 초안**이며, 실제 적용 전 각 Terraform root에서 아래 명령을 반드시 실행해야 합니다.
+
 ```bash
-cd onprem
+terraform fmt -recursive
 terraform init
+terraform validate
 terraform plan
-terraform apply
 ```
 
-첫 `apply`에서 기존 리소스가 state로 import 됩니다. import가 끝난 뒤에는 각 파일의 `import` 블록을 지워도 됩니다.
+## 운영 전 필수 검증
 
----
+- 모든 writer Deployment/CronJob이 label selector에 포함되는지 확인
+- AWS Master가 SSM Managed Instance로 Online인지 확인
+- CodeBuild IAM 역할이 오직 예상 Master에 SSM Run Command를 전송하는지 확인
+- on-prem IAM 권한이 `failback/` prefix 이외의 데이터에 불필요하게 접근하지 않는지 확인
+- NFS RWX StorageClass와 충분한 용량 확인
+- DNS/NodePort health check가 외부에서 정상 동작하는지 확인
+- DB 데이터 일치, API/업무 검증, 실제 RTO/RPO 측정
+- 실패/중단 시 양쪽에서 동시에 쓰기가 열리지 않는지 확인
 
-## aws-bootstrap
+## 참고 오픈소스
 
-장애 감지부터 CodeBuild 실행까지 연결하는 사전 준비 리소스입니다. 사람이 **한 번** apply 합니다.
+- **Kubespray**: Terraform이 EC2와 네트워크를 만든 뒤 기존 서버에 Kubernetes를 설치하는 모델과 잘 맞습니다. 이미 `aws-dr`가 `kubeadm`으로 클러스터를 직접 설치하므로, Kubespray로 바꾸려면 해당 user-data/kubeadm 구현과 중복되지 않도록 배포 주체 하나를 선택하세요.
+- **kOps**: AWS 중심으로 Kubernetes 클러스터의 인프라와 라이프사이클을 관리할 때 적합합니다. 같은 AWS 클러스터의 VPC/EC2/Control Plane을 Terraform과 kOps 양쪽에서 동시에 소유하지 마세요.
+- **Velero**: Kubernetes 객체와 지원되는 볼륨 데이터 백업/복구에 유용하지만 MongoDB 논리 일관성 백업을 대체하지는 않습니다. MongoDB 데이터는 현재의 `mongodump/mongorestore`, replica set/복제, 또는 검증된 DB 백업 전략과 조합하세요.
 
-| 파일 | 리소스 |
-| --- | --- |
-| [s3.tf](aws-bootstrap/s3.tf) | 기존 버킷 참조, `aws-dr/` → `recovery.zip` 압축/업로드 (내용이 바뀌면 다시 올라감) |
-| [cloudwatch.tf](aws-bootstrap/cloudwatch.tf) | 하트비트 알람 (`treat_missing_data = breaching`), CodeBuild 로그 그룹 |
-| [eventbridge.tf](aws-bootstrap/eventbridge.tf) | 알람 `OK -> ALARM` 시 CodeBuild 실행 |
-| [codebuild.tf](aws-bootstrap/codebuild.tf) | `wegovy-dr-recovery` 프로젝트 (Terraform 설치 → init → `apply`/`destroy`), 동시 실행 1개 |
-| [iam.tf](aws-bootstrap/iam.tf) | 온프레용 유저/키, CodeBuild·EventBridge·EC2 역할, 인스턴스 프로파일 |
-| [ssm.tf](aws-bootstrap/ssm.tf) | MongoDB root 비밀번호 (SecureString) |
-| [route53.tf](aws-bootstrap/route53.tf) | DR 진입점 EIP (미리 할당), Failover 레코드/헬스체크 (`enable_route53 = true` 일 때만) |
-
-**실행**
-
-`aws-bootstrap/terraform.tfvars`:
-
-```hcl
-mongo_root_password = "<온프레와 같은 비밀번호>"
-
-# 도메인이 준비되면
-# enable_route53   = true
-# hosted_zone_name = "example.com"
-# record_name      = "app.example.com"
-# onprem_public_ip = "x.x.x.x"
-```
-
-```bash
-cd aws-bootstrap
-export AWS_PROFILE=<본인 프로필>
-terraform init
-terraform plan
-terraform apply
-```
-
-- provider에 `allowed_account_ids = ["995342110514"]`가 걸려 있어서 다른 계정으로 실행하면 바로 실패합니다.
-- `aws-dr/`을 수정했으면 여기서 다시 `apply` 해야 S3의 `recovery.zip`이 갱신됩니다.
-- 실행하는 IAM 유저에 IAM / SSM / CloudWatch Logs / CodeBuild / EventBridge / EC2(EIP) 권한이 필요합니다.
-
-**온프레 하트비트용 키 꺼내기**
-
-```bash
-terraform output -raw onprem_access_key_id
-terraform output -raw onprem_secret_access_key
-```
-
-하트비트 CronJob은 아래 형식으로 1분마다 메트릭을 보내야 합니다.
-
-```bash
-aws cloudwatch put-metric-data --namespace Wegovy/DR --metric-name Heartbeat \
-  --dimensions Cluster=onprem --value 1
-```
-
----
-
-## aws-dr
-
-CodeBuild가 `recovery.zip`으로 받아서 실행하는 DR 환경입니다. **사람이 직접 apply 하지 않습니다.**
-
-| 파일 | 내용 |
-| --- | --- |
-| [network.tf](aws-dr/network.tf) | VPC `10.50.0.0/16`, 퍼블릭 서브넷, SG (80/443 공개, 노드 간 전체 허용, 6443은 `admin_cidrs`만) |
-| [compute.tf](aws-dr/compute.tf) | Ubuntu 24.04 master 1 + worker `worker_count`(기본 1), kubeadm join 토큰 생성, EIP 연결 |
-| [templates/common.sh](aws-dr/templates/common.sh) | containerd 2.x, kubeadm/kubelet/kubectl 1.36, AWS CLI |
-| [templates/master.sh.tftpl](aws-dr/templates/master.sh.tftpl) | kubeadm init → Flannel → local-path → MongoDB/mongo-express → S3 백업 복원 → `dr-manifests/` apply |
-| [templates/worker.sh.tftpl](aws-dr/templates/worker.sh.tftpl) | master 준비될 때까지 재시도하며 join |
-
-온프레와 맞춘 값: Kubernetes 1.36, Flannel v0.28.9, 파드 대역 `10.244.0.0/16`, MongoDB 6.0, NodePort 30017/30081.
-
-변수(`backup_bucket`, `backup_key`, `instance_profile_name`, `eip_allocation_id`, `mongo_password_parameter`)는 CodeBuild 환경변수 `TF_VAR_*`로 aws-bootstrap이 넘겨줍니다.
-
-**복구 진행 확인 / RTO·RPO 측정**
-
-```bash
-aws ssm start-session --target <master 인스턴스 ID>
-sudo tail -f /var/log/dr-bootstrap.log
-```
-
-| 로그 | 의미 |
-| --- | --- |
-| `DR_BOOT_START` | user-data 시작 |
-| `DR_CLUSTER_READY` | 노드 Ready |
-| `DR_DB_READY` | MongoDB 기동 |
-| `DR_BACKUP_LAST_MODIFIED` | 복원한 백업 시각 (**RPO** 계산용) |
-| `DR_DB_RESTORED` | 복원 완료 |
-| `DR_BOOT_DONE` | 전체 완료 |
-
----
-
-## 테스트 / 페일백
-
-```bash
-# 1. 장애 없이 CodeBuild만 수동 실행 (DR 환경 생성)
-aws codebuild start-build --project-name wegovy-dr-recovery
-
-# 2. 알람을 강제로 ALARM 으로 바꿔서 EventBridge 연결 확인 (알람이 OK 상태일 때)
-aws cloudwatch set-alarm-state --alarm-name wegovy-onprem-heartbeat \
-  --state-value ALARM --state-reason "DR test"
-
-# 3. 페일백 후 DR 환경 정리
-aws codebuild start-build --project-name wegovy-dr-recovery \
-  --environment-variables-override name=TF_ACTION,value=destroy,type=PLAINTEXT
-```
-
-> EventBridge는 알람이 **OK → ALARM** 으로 바뀔 때만 반응합니다. 하트비트가 한 번도 들어오지 않아 알람이 OK가 된 적이 없으면 자동 복구도 시작되지 않습니다.
-
----
-
-## 주의 사항
-
-- **state 파일에 비밀번호와 액세스 키가 평문으로 저장됩니다.** `*.tfstate`, `*.tfvars`, `*.tfplan`은 커밋하지 않습니다.
-- onprem 네임스페이스는 `prevent_destroy`가 걸려 있어 `terraform destroy`로 삭제되지 않습니다.
-- NFS StorageClass는 `reclaim_policy = "Retain"`이라 PVC를 지워도 데이터가 남습니다.
-- Prometheus는 아직 영구 저장소가 연결되지 않아 Pod 재시작 시 메트릭이 사라집니다. 이후 `nfs-prometheus` StorageClass로 연결할 예정입니다.
-- 백업이 1시간 주기라 **RPO는 최대 1시간**입니다.
-- 미리 할당한 EIP는 EC2에 붙어 있지 않아도 요금이 나옵니다 (월 약 $3.6).
-- CodeBuild 역할은 이 리전 안에서 `ec2:*` 권한을 가집니다.
-
+공식 자료:
+- Kubespray: https://github.com/kubernetes-sigs/kubespray
+- kOps: https://kops.sigs.k8s.io/
+- MongoDB mongorestore: https://www.mongodb.com/docs/database-tools/mongorestore/
+- AWS SSM Run Command: https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command.html
+- Velero: https://velero.io/docs/
