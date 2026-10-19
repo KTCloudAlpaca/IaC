@@ -83,7 +83,7 @@ aws codebuild start-build --project-name wegovy-dr-recovery
 > **실제로 nginx가 DR 서버로 전환됩니다.** 테스트 후에는 아래 페일백 내용대로 되돌려야 합니다.
 > 자동 실행은 `EC2-trigger-alarm`이 **OK → ALARM**으로 바뀔 때만 일어납니다. 하트비트가 꾸준히 들어와 알람이 OK 상태여야 자동 복구가 동작합니다.
 
-## 페일백 담당자 인수인계
+## 페일백 
 
 recover.sh가 DR 서버에서 바꾸는 것:
 
