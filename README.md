@@ -95,13 +95,6 @@ terraform apply   # terraform.tfvars 에 mongo_root_password (온프레와 같�
 
 백업 EC2 는 ECR 이미지를 온프레와 같은 이름(`docker.io/library/launcher-*`)으로 저장해서 같은 `app.tf` 로 실행합니다. 앱 버전을 올릴 때마다 **이미지가 있는 노드에서** ECR로 push 하고, [onprem/app.tf](onprem/app.tf)의 이미지 태그와 aws-bootstrap의 `app_image_tag`를 같이 바꿉니다.
 
-```bash
-REGISTRY=995342110514.dkr.ecr.ap-northeast-2.amazonaws.com
-TOKEN=$(aws ecr get-login-password --region ap-northeast-2)
-sudo ctr -n k8s.io images convert --oci --platform linux/amd64 docker.io/library/launcher-frontend:v1 $REGISTRY/launcher-frontend:v1
-sudo ctr -n k8s.io images push --platform linux/amd64 --user "AWS:$TOKEN" $REGISTRY/launcher-frontend:v1
-# launcher-backend 도 같은 방식
-```
 
 ## DR 서버(EC2Backup) 준비
 
