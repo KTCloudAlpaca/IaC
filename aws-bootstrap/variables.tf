@@ -38,6 +38,12 @@ variable "app_images" {
   default     = ["launcher-frontend", "launcher-backend"]
 }
 
+variable "app_image_tag" {
+  type        = string
+  description = "DR 서버가 받을 앱 이미지 태그 (onprem/app.tf 의 이미지 태그와 같게)"
+  default     = "v1"
+}
+
 # ---------- 하트비트 / 알람 ----------
 
 variable "heartbeat_alarm_name" {

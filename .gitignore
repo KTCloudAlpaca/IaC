@@ -30,3 +30,6 @@ terraform.rc
 
 # aws-bootstrap 이 만드는 recovery.zip
 .build/
+
+# 환경별 설정(비밀값 없음)은 커밋
+!onprem/env/*.tfvars

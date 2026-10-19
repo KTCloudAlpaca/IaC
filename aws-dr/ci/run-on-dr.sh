@@ -4,7 +4,7 @@
 #   DR_ACTION=failback-export : 페일백 - DR 앱 중지 + DB 덤프 (FAILBACK_ID 필요)
 #   DR_ACTION=failback-finish : 페일백 - nginx 원복 + 정리
 # 필요한 환경변수 (aws-bootstrap 의 CodeBuild 프로젝트가 넣어줌)
-#   DR_ACTION, DR_PUBLIC_IP, BACKUP_BUCKET, BACKUP_KEY, MONGO_PASSWORD_PARAMETER, ECR_REGISTRY, AWS_REGION
+#   DR_ACTION, DR_PUBLIC_IP, BACKUP_BUCKET, BACKUP_KEY, MONGO_PASSWORD_PARAMETER, ECR_REGISTRY, APP_IMAGES, AWS_REGION
 set -euo pipefail
 
 case "${DR_ACTION:-recover}" in
@@ -25,8 +25,8 @@ fi
 echo "DR 서버: $INSTANCE_ID ($DR_PUBLIC_IP)"
 
 # 스크립트를 base64 로 넘겨서 원격에서 그대로 실행
-ENV_VARS=$(printf 'BACKUP_BUCKET=%q BACKUP_KEY=%q MONGO_PASSWORD_PARAMETER=%q ECR_REGISTRY=%q FAILBACK_ID=%q AWS_REGION=%q' \
-  "$BACKUP_BUCKET" "$BACKUP_KEY" "$MONGO_PASSWORD_PARAMETER" "$ECR_REGISTRY" "${FAILBACK_ID:-}" "$AWS_REGION")
+ENV_VARS=$(printf 'BACKUP_BUCKET=%q BACKUP_KEY=%q MONGO_PASSWORD_PARAMETER=%q ECR_REGISTRY=%q APP_IMAGES=%q FAILBACK_ID=%q AWS_REGION=%q' \
+  "$BACKUP_BUCKET" "$BACKUP_KEY" "$MONGO_PASSWORD_PARAMETER" "$ECR_REGISTRY" "$APP_IMAGES" "${FAILBACK_ID:-}" "$AWS_REGION")
 REMOTE_CMD="echo $(base64 -w0 "$SCRIPT") | base64 -d > /tmp/wegovy-dr.sh && $ENV_VARS bash /tmp/wegovy-dr.sh"
 PARAMS=$(python3 -c 'import json, sys; print(json.dumps({"commands": [sys.argv[1]], "executionTimeout": ["3600"]}))' "$REMOTE_CMD")
 

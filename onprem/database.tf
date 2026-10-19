@@ -1,12 +1,14 @@
 # 팀원이 kubectl로 만든 MongoDB를 Terraform 관리로 가져오기
 import {
-  to = kubernetes_stateful_set_v1.mongodb
-  id = "db/mongodb"
+  for_each = local.import_once
+  to       = kubernetes_stateful_set_v1.mongodb
+  id       = "db/mongodb"
 }
 
 import {
-  to = kubernetes_service_v1.mongodb
-  id = "db/mongodb"
+  for_each = local.import_once
+  to       = kubernetes_service_v1.mongodb
+  id       = "db/mongodb"
 }
 
 resource "kubernetes_stateful_set_v1" "mongodb" {
@@ -61,17 +63,17 @@ resource "kubernetes_stateful_set_v1" "mongodb" {
           }
         }
 
-        # 팀원이 만든 NFS PVC를 그대로 사용
+        # NFS PVC (storage.tf)
         volume {
           name = "mongodb-data"
           persistent_volume_claim {
-            claim_name = "mongodb-data-nfs-pvc"
+            claim_name = kubernetes_persistent_volume_claim_v1.mongodb_data.metadata[0].name
           }
         }
         volume {
           name = "mongodb-logs"
           persistent_volume_claim {
-            claim_name = "mongodb-logs-nfs-pvc"
+            claim_name = kubernetes_persistent_volume_claim_v1.mongodb_logs.metadata[0].name
           }
         }
       }
@@ -98,13 +100,15 @@ resource "kubernetes_service_v1" "mongodb" {
 }
 # 팀원이 kubectl로 만든 mongo-express(웹 DB 관리 화면) 가져오기
 import {
-  to = kubernetes_deployment_v1.mongo_express
-  id = "db/mongo-express"
+  for_each = local.import_once
+  to       = kubernetes_deployment_v1.mongo_express
+  id       = "db/mongo-express"
 }
 
 import {
-  to = kubernetes_service_v1.mongo_express
-  id = "db/mongo-express"
+  for_each = local.import_once
+  to       = kubernetes_service_v1.mongo_express
+  id       = "db/mongo-express"
 }
 
 resource "kubernetes_deployment_v1" "mongo_express" {

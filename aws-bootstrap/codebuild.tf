@@ -53,10 +53,15 @@ resource "aws_codebuild_project" "dr" {
       value = aws_ssm_parameter.mongo_root_password.name
     }
 
-    # 앱 이미지를 받을 ECR 주소
+    # 앱 이미지를 받을 ECR 주소와 이미지:태그 목록
     environment_variable {
       name  = "ECR_REGISTRY"
       value = local.ecr_registry
+    }
+
+    environment_variable {
+      name  = "APP_IMAGES"
+      value = join(" ", [for i in var.app_images : "${i}:${var.app_image_tag}"])
     }
   }
 

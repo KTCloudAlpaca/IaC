@@ -1,8 +1,9 @@
 # 팀원이 helm으로 설치한 kube-prometheus-stack(mymonitor)을 Terraform 관리로 가져오기
 # 첫 apply 성공 후에는 이 import 블록을 지워도 됨
 import {
-  to = helm_release.monitoring
-  id = "monitor/mymonitor"
+  for_each = local.import_once
+  to       = helm_release.monitoring
+  id       = "monitor/mymonitor"
 }
 
 # Prometheus + Alertmanager + Grafana + node-exporter + kube-state-metrics
@@ -14,21 +15,28 @@ resource "helm_release" "monitoring" {
   version    = "92.3.0"
 
   values = [file("${path.module}/values/prometheus.yaml")]
+
+  # 빈 클러스터에서는 메트릭 저장소(NFS StorageClass)가 먼저 있어야 함
+  depends_on = [kubernetes_storage_class_v1.nfs_prometheus]
 }
 
 # 팀원이 kubectl로 만든 Prometheus용 NFS StorageClass 가져오기
 import {
-  to = kubernetes_storage_class_v1.nfs_prometheus
-  id = "nfs-prometheus"
+  for_each = local.import_once
+  to       = kubernetes_storage_class_v1.nfs_prometheus
+  id       = "nfs-prometheus"
 }
 
 import {
-  to = kubernetes_storage_class_v1.nfs_prometheus_logs
-  id = "nfs-prometheus-logs"
+  for_each = local.import_once
+  to       = kubernetes_storage_class_v1.nfs_prometheus_logs
+  id       = "nfs-prometheus-logs"
 }
 
-# 메트릭 저장용 (master: /data/prometheus)
+# 메트릭 저장용 (NFS 서버: /data/prometheus)
 resource "kubernetes_storage_class_v1" "nfs_prometheus" {
+  depends_on = [helm_release.csi_driver_nfs]
+
   metadata {
     name = "nfs-prometheus"
   }
@@ -39,12 +47,12 @@ resource "kubernetes_storage_class_v1" "nfs_prometheus" {
   allow_volume_expansion = true
 
   parameters = {
-    server = "10.120.0.140"
+    server = var.nfs_server
     share  = "/data/prometheus"
   }
 }
 
-# 로그 저장용 (master: /data/prometheus-logs)
+# 로그 저장용 (NFS 서버: /data/prometheus-logs)
 resource "kubernetes_storage_class_v1" "nfs_prometheus_logs" {
   metadata {
     name = "nfs-prometheus-logs"
@@ -56,7 +64,7 @@ resource "kubernetes_storage_class_v1" "nfs_prometheus_logs" {
   allow_volume_expansion = true
 
   parameters = {
-    server = "10.120.0.140"
+    server = var.nfs_server
     share  = "/data/prometheus-logs"
   }
 }
@@ -64,8 +72,9 @@ resource "kubernetes_storage_class_v1" "nfs_prometheus_logs" {
 # 팀원이 kubectl로 만든 로그 저장용 PVC 가져오기
 # (nfs-prometheus-test PVC는 연결 테스트용이라 제외)
 import {
-  to = kubernetes_persistent_volume_claim_v1.prometheus_logs
-  id = "monitor/prometheus-logs-pvc"
+  for_each = local.import_once
+  to       = kubernetes_persistent_volume_claim_v1.prometheus_logs
+  id       = "monitor/prometheus-logs-pvc"
 }
 
 resource "kubernetes_persistent_volume_claim_v1" "prometheus_logs" {

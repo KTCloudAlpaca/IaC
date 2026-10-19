@@ -1,28 +1,33 @@
 # 앱 담당이 kubectl로 배포한 frontend / backend 가져오기
 # DR 쪽 같은 구성은 aws-dr/manifests/app.yaml (이미지만 ECR)
 import {
-  to = kubernetes_secret_v1.backend
-  id = "app/backend-secret"
+  for_each = local.import_once
+  to       = kubernetes_secret_v1.backend
+  id       = "app/backend-secret"
 }
 
 import {
-  to = kubernetes_deployment_v1.backend
-  id = "app/backend"
+  for_each = local.import_once
+  to       = kubernetes_deployment_v1.backend
+  id       = "app/backend"
 }
 
 import {
-  to = kubernetes_service_v1.backend
-  id = "app/backend"
+  for_each = local.import_once
+  to       = kubernetes_service_v1.backend
+  id       = "app/backend"
 }
 
 import {
-  to = kubernetes_deployment_v1.frontend
-  id = "app/frontend"
+  for_each = local.import_once
+  to       = kubernetes_deployment_v1.frontend
+  id       = "app/frontend"
 }
 
 import {
-  to = kubernetes_service_v1.frontend
-  id = "app/frontend"
+  for_each = local.import_once
+  to       = kubernetes_service_v1.frontend
+  id       = "app/frontend"
 }
 
 # backend 가 쓰는 MongoDB 접속 정보
@@ -58,7 +63,7 @@ resource "kubernetes_deployment_v1" "backend" {
       spec {
         automount_service_account_token = false
         enable_service_links            = false
-        node_selector                   = { "kubernetes.io/hostname" = "worker" }
+        node_selector                   = var.app_node_selector
 
         container {
           name              = "backend"
@@ -149,7 +154,7 @@ resource "kubernetes_deployment_v1" "frontend" {
       spec {
         automount_service_account_token = false
         enable_service_links            = false
-        node_selector                   = { "kubernetes.io/hostname" = "worker" }
+        node_selector                   = var.app_node_selector
 
         container {
           name              = "frontend"

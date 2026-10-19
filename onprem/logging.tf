@@ -1,13 +1,15 @@
 # 팀원이 kubectl로 만든 Prometheus 로그 수집기(fluent-bit DaemonSet) 가져오기
 # Prometheus 파드 로그를 prometheus-logs-pvc(NFS) 에 파일로 저장
 import {
-  to = kubernetes_config_map_v1.log_collector
-  id = "monitor/prometheus-log-collector-config"
+  for_each = local.import_once
+  to       = kubernetes_config_map_v1.log_collector
+  id       = "monitor/prometheus-log-collector-config"
 }
 
 import {
-  to = kubernetes_daemon_set_v1.log_collector
-  id = "monitor/prometheus-log-collector"
+  for_each = local.import_once
+  to       = kubernetes_daemon_set_v1.log_collector
+  id       = "monitor/prometheus-log-collector"
 }
 
 resource "kubernetes_config_map_v1" "log_collector" {

@@ -5,7 +5,7 @@ locals {
 # 이미 kubectl로 만들어둔 네임스페이스를 Terraform 관리로 가져오기
 # 첫 apply 성공 후에는 이 import 블록을 지워도 됨
 import {
-  for_each = local.namespaces
+  for_each = var.import_existing ? local.namespaces : toset([])
   to       = kubernetes_namespace_v1.this[each.key]
   id       = each.key
 }

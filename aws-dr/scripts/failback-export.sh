@@ -9,8 +9,8 @@ exec > >(tee -a /var/log/wegovy-dr.log) 2>&1
 
 : "${BACKUP_BUCKET:?}" "${MONGO_PASSWORD_PARAMETER:?}" "${FAILBACK_ID:?}" "${AWS_REGION:?}"
 export HOME=/root
-export PATH=$PATH:/usr/local/bin
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+export PATH=$PATH:/usr/local/bin:/usr/local/sbin
+export KUBECONFIG=/etc/kubernetes/admin.conf
 
 DUMP_KEY="failback/dr-$FAILBACK_ID.archive"
 WORK=$(mktemp -d)

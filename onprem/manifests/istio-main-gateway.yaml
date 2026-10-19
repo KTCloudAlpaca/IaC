@@ -1,0 +1,15 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: main-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway # istio 기본 인그레스 게이트웨이 파드 라벨 매핑
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*" # 모든 도메인 인입 허용
