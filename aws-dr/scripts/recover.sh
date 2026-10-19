@@ -28,7 +28,7 @@ log DR_RECOVER_START
 
 # ---------- 1. 클러스터 확인 ----------
 if [ ! -f "$KUBECONFIG" ]; then
-  echo "쿠버네티스가 설치되어 있지 않습니다. onprem/scripts/install-k8s.sh 와 onprem Terraform(env/backup.tfvars) 로 먼저 구축하세요."
+  echo "쿠버네티스가 설치되어 있지 않습니다. 쿠버네티스 설치 후 onprem/scripts/prepare-backup-node.sh 와 onprem Terraform(env/backup.tfvars) 로 먼저 구축하세요."
   exit 1
 fi
 kubectl wait --for=condition=Ready node --all --timeout=180s

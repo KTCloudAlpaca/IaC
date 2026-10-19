@@ -11,8 +11,9 @@ OUT=$HOME/.kube/backup.conf
 
 mkdir -p "$HOME/.kube"
 umask 077
+# API 서버 인증서에 127.0.0.1 이 없어서 tls-server-name 으로 인증서의 'kubernetes' 이름을 검증
 ssh -i "$KEY" "$HOST" 'sudo cat /etc/kubernetes/admin.conf' \
-  | sed -E "s#server: https://[^ ]+#server: https://127.0.0.1:$LOCAL_PORT#" > "$OUT"
+  | sed -E "s#^( +)server: https://[^ ]+#\1server: https://127.0.0.1:$LOCAL_PORT\n\1tls-server-name: kubernetes#" > "$OUT"
 
 # 터널이 없으면 백그라운드로 연결
 if ! ss -ltn "sport = :$LOCAL_PORT" | grep -q LISTEN; then

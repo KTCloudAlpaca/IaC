@@ -1,5 +1,5 @@
 # NFS 스토리지: CSI 드라이버 + MongoDB 용 고정 PV/PVC
-# NFS 서버 자체(/etc/exports, /data/*)는 scripts/install-k8s.sh 가 준비
+# NFS 서버 자체(/etc/exports, /data/*)는 scripts/prepare-backup-node.sh 가 준비 (온프레는 master 에 이미 있음)
 
 import {
   for_each = local.import_once

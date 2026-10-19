@@ -59,8 +59,8 @@ terraform apply   # terraform.tfvars 에 mongo_root_password 필요
 **백업 EC2 에 같은 환경 구축**
 
 ```bash
-# 1. EC2Backup 에서: 쿠버네티스 기반 설치 (kubeadm 1.36.3, containerd 2.3.6, Flannel, NFS 서버, 앱 이미지)
-sudo PUBLIC_IP=43.200.208.156 bash install-k8s.sh      # onprem/scripts/install-k8s.sh
+# 1. EC2Backup 에서: NFS 서버(/data/*) + 앱 이미지(ECR → 온프레와 같은 이름)
+sudo bash prepare-backup-node.sh      # onprem/scripts/prepare-backup-node.sh
 
 # 2. 온프레 master 에서: 백업 클러스터 접속 (SSH 터널 → ~/.kube/backup.conf)
 ./onprem/scripts/backup-kubeconfig.sh
@@ -71,8 +71,8 @@ terraform workspace new backup     # 처음 한 번 (state 분리)
 terraform apply -var-file=env/backup.tfvars
 ```
 
-- Terraform 은 서버에 쿠버네티스 자체를 설치할 수 없어서 1번은 스크립트로 합니다. 온프레와 같은 버전으로 고정되어 있습니다.
-- 온프레와 다른 점: 노드 1대(master 에도 파드 배치), MetalLB 없음(AWS VPC 에서 L2 미동작, nginx 가 대신함).
+- 쿠버네티스 자체는 EC2Backup 에 미리 설치되어 있어야 합니다 (현재 kubeadm v1.31.14 + Calico 설치됨).
+- 온프레와 다른 점: 쿠버네티스 버전/CNI(온프레 1.36.3 + Flannel), 노드 1대(master 에도 파드 배치), MetalLB 없음(AWS VPC 에서 L2 미동작, nginx 가 대신함).
 - Prometheus + Istio 까지 올리므로 **메모리 8GB(t3.large) 이상**이 필요합니다.
 - 클러스터를 `kubectl`로 직접 바꾸면 코드와 달라집니다. 바꿀 때는 코드도 같이 고치고 `plan`으로 확인하세요.
 - **IaC 범위 밖:** `dr-backup-cronjob`, 하트비트 크론(호스트 crontab)
