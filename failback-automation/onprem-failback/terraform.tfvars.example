@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars locally. NEVER commit the real file.
+kubeconfig_path = "~/.kube/config"
+backup_bucket   = "k8s-hybrid-dr-backup-2026-995342110514-ap-northeast-2-an"
+aws_region      = "ap-northeast-2"
+
+# Obtain from aws-bootstrap outputs after applying aws-bootstrap/failback-automation.tf.
+aws_access_key_id     = "REPLACE_ME"
+aws_secret_access_key = "REPLACE_ME"
+# Must match the on-prem MongoDB root password.
+mongo_root_password = "REPLACE_ME"
+
+# Existing StorageClass is used by default for lab purposes; use a dedicated StorageClass in production.
+state_storage_class = "nfs-prometheus"
+work_storage_class  = "nfs-prometheus"
+work_storage_size   = "30Gi"
+
+# All write-capable Deployments/CronJobs in these namespaces must have the label:
+# dr-failback-managed=true
+failback_workload_namespaces = ["app", "ai"]
+initial_onprem_ready = true
+readiness_node_port  = 30082

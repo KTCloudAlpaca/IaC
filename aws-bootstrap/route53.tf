@@ -19,9 +19,9 @@ resource "aws_route53_health_check" "primary" {
   count = var.enable_route53 ? 1 : 0
 
   ip_address        = var.onprem_public_ip
-  port              = var.health_check_port
+  port              = var.primary_health_check_port
   type              = "HTTP"
-  resource_path     = var.health_check_path
+  resource_path     = var.primary_health_check_path
   request_interval  = 10
   failure_threshold = 3
 
