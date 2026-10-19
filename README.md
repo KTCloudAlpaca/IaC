@@ -129,12 +129,12 @@ AWS_PROFILE=wegovy ./onprem/scripts/failback.sh
 
 | 단계 | 내용 | 코드 |
 | --- | --- | --- |
-| 1 | 온프레 클러스터 / MongoDB 확인 | [onprem/scripts/failback.sh](onprem/scripts/failback.sh) |
+| 1 | 온프레 노드 Ready + app / monitor / db 서비스 구동 확인 | [onprem/scripts/failback.sh](onprem/scripts/failback.sh) |
 | 2 | 온프레 앱 0개로 내림 → 헬스체크 실패 → 트래픽은 계속 DR | 〃 |
 | 3 | 온프레 현재 DB 스냅샷 → S3 `failback/onprem-before-<ID>.archive` | 〃 |
 | 4 | DR 앱 중지 + DR DB 덤프 → S3 `failback/dr-<ID>.archive` (**서비스 중단 시작**) | CodeBuild → [failback-export.sh](aws-dr/scripts/failback-export.sh) |
 | 5 | 온프레에 복원 → 온프레 앱 시작 → Route 53 이 온프레로 전환 (**서비스 재개**) | [onprem/scripts/failback.sh](onprem/scripts/failback.sh) |
-| 6 | DR 서버 nginx 원복, 복원 표시 삭제, DR 환경 삭제 (쿠버네티스만 남김) | CodeBuild → [failback-finish.sh](aws-dr/scripts/failback-finish.sh) |
+| 6 | DR 서버 nginx 원복, DR 환경 destroy → **삭제 확인**(네임스페이스·state·CRD 0개, DR 서버 경유 응답 200) | CodeBuild → [failback-finish.sh](aws-dr/scripts/failback-finish.sh) |
 
 - 온프레 앱은 **복원이 끝난 뒤에** 올립니다. 먼저 올리면 Route 53 이 장애 이전 데이터로 트래픽을 돌려보냅니다.
 - 실패하면 몇 단계에서 멈췄는지와 다음 조치를 출력합니다. 문제가 있으면 `onprem-before-<ID>.archive`로 온프레 DB를 되돌릴 수 있습니다.

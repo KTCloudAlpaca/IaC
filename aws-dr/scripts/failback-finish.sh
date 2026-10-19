@@ -5,6 +5,7 @@
 #   3. recover.sh 가 만든 환경 삭제 -> 다시 "쿠버네티스만 설치된 상태"로
 #      (onprem Terraform destroy + Terraform 이 지우지 못하는 Istio / 네임스페이스 / PV / CRD 정리)
 #      NFS 데이터(/data/*) 와 앱 이미지는 남김
+#   4. 삭제 확인 (네임스페이스 / Terraform state / CRD 가 남아 있으면 실패)
 # 온프레 onprem/scripts/failback.sh 가 CodeBuild(DR_ACTION=failback-finish) 로 실행함
 # 진행 로그: /var/log/wegovy-dr.log
 set -euo pipefail
@@ -57,4 +58,14 @@ kubectl delete namespace istio-system $NAMESPACES --ignore-not-found --wait=true
 kubectl get pv -o jsonpath='{range .items[?(@.status.phase=="Released")]}{.metadata.name}{" "}{.spec.claimRef.namespace}{"\n"}{end}' \
   | awk '$2=="db" || $2=="monitor" {print $1}' | xargs -r kubectl delete pv
 kubectl get crd -o name | grep 'monitoring.coreos.com' | xargs -r kubectl delete
+
+# ---------- 4. 삭제 확인: 쿠버네티스만 남았는지 ----------
+left_ns=$(kubectl get ns -o name | grep -E "namespace/(istio-system|$(echo $NAMESPACES | tr ' ' '|'))$" || true)
+left_state=$(tf state list | grep -v '^data\.' || true)
+left_crd=$(kubectl get crd -o name | grep -E 'istio.io|monitoring.coreos.com' || true)
+echo "남은 네임스페이스: ${left_ns:-없음}"
+echo "남은 Terraform 리소스: ${left_state:-없음}"
+echo "남은 Istio/Prometheus CRD: ${left_crd:-없음}"
+[ -z "$left_ns$left_state$left_crd" ] || { echo "DR 환경이 완전히 삭제되지 않았습니다"; exit 1; }
+log DR_ENV_DESTROY_VERIFIED
 log DR_FAILBACK_FINISH_DONE
