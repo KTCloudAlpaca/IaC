@@ -19,7 +19,13 @@ resource "terraform_data" "istio" {
     environment = local.kube_env
   }
 
-  depends_on = [kubernetes_namespace_v1.this]
+  # Istio gateway 는 NodePort 를 무작위로 받음 -> 고정 NodePort(30080/30017/30081) 서비스를 먼저 만들어 충돌 방지
+  depends_on = [
+    kubernetes_namespace_v1.this,
+    kubernetes_service_v1.frontend,
+    kubernetes_service_v1.mongodb,
+    kubernetes_service_v1.mongo_express,
+  ]
 }
 
 resource "terraform_data" "istio_main_gateway" {
