@@ -1,0 +1,19 @@
+# backend /metrics 를 Prometheus 가 수집 (앱 담당 ~/Dev/ServiceMonitor.yaml 과 동일)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: myapp-monitor
+  namespace: monitor
+  labels:
+    release: mymonitor # Prometheus 가 이 라벨이 있는 ServiceMonitor 만 수집
+spec:
+  selector:
+    matchLabels:
+      app: backend # backend Service 라벨 (app.tf)
+  namespaceSelector:
+    matchNames:
+      - app
+  endpoints:
+    - port: http # backend Service 포트 이름 (app.tf)
+      path: /metrics
+      interval: 15s

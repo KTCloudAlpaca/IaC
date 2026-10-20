@@ -94,3 +94,15 @@ resource "kubernetes_persistent_volume_claim_v1" "prometheus_logs" {
     }
   }
 }
+
+# backend 앱 메트릭 수집용 ServiceMonitor (Prometheus CRD 라서 Helm 설치 후 kubectl 로 적용)
+resource "terraform_data" "servicemonitor_backend" {
+  triggers_replace = [filemd5("${path.module}/manifests/servicemonitor-backend.yaml")]
+
+  provisioner "local-exec" {
+    command     = "kubectl apply -f ${path.module}/manifests/servicemonitor-backend.yaml"
+    environment = { KUBECONFIG = pathexpand(var.kubeconfig_path) }
+  }
+
+  depends_on = [helm_release.monitoring, kubernetes_service_v1.backend]
+}

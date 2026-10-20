@@ -62,7 +62,7 @@ resource "aws_codebuild_project" "dr" {
 
     environment_variable {
       name  = "APP_IMAGES"
-      value = join(" ", [for i in var.app_images : "${i}:${var.app_image_tag}"])
+      value = join(" ", [for name, tag in var.app_images : "${name}:${tag}"])
     }
   }
 

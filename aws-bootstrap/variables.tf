@@ -33,15 +33,12 @@ variable "mongo_root_password" {
 # ---------- ECR ----------
 
 variable "app_images" {
-  type        = list(string)
-  description = "ECR 저장소를 만들 앱 이미지 이름 (온프레 이미지 이름과 같게)"
-  default     = ["launcher-frontend", "launcher-backend"]
-}
-
-variable "app_image_tag" {
-  type        = string
-  description = "DR 서버가 받을 앱 이미지 태그 (onprem/app.tf 의 이미지 태그와 같게)"
-  default     = "v1"
+  type        = map(string)
+  description = "DR 서버가 ECR 에서 받을 앱 이미지와 태그 (onprem/app.tf 의 이미지 태그와 같게)"
+  default = {
+    "launcher-frontend" = "v1"
+    "launcher-backend"  = "v2" # prom-client /metrics
+  }
 }
 
 # ---------- 하트비트 / 알람 ----------

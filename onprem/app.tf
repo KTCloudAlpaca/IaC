@@ -69,7 +69,7 @@ resource "kubernetes_deployment_v1" "backend" {
 
         container {
           name              = "backend"
-          image             = "launcher-backend:v1"
+          image             = "launcher-backend:v2" # v2: prom-client /metrics
           image_pull_policy = "IfNotPresent"
 
           port {
@@ -122,6 +122,7 @@ resource "kubernetes_service_v1" "backend" {
   metadata {
     name      = "backend"
     namespace = kubernetes_namespace_v1.this["app"].metadata[0].name
+    labels    = { app = "backend" } # ServiceMonitor(myapp-monitor) 가 이 라벨로 찾음
   }
 
   spec {
