@@ -129,6 +129,7 @@ resource "kubernetes_service_v1" "backend" {
     selector = { app = "backend" }
 
     port {
+      name        = "http" # Prometheus(ServiceMonitor)가 포트 이름으로 수집
       port        = 5000
       target_port = 5000
     }
