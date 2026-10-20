@@ -89,8 +89,6 @@ export AWS_PROFILE=<본인 프로필>
 terraform init
 terraform apply   # terraform.tfvars 에 mongo_root_password (온프레와 같게) 필요
 ```
-
-- 계정 `995342110514`가 아니면 실행이 막힙니다.
 - `aws-dr/`을 수정했으면 다시 `apply` 해야 S3의 `recovery.zip`이 갱신됩니다.
 - 하트비트와 알람은 팀원이 만든 것을 씁니다 (`OnPrem/Kubernetes` / `Heartbeat` / `Cluster=onprem-k8s`, 알람 `EC2-trigger-alarm`). Terraform은 알람을 참조만 하며, 알람 이름이 바뀌면 `heartbeat_alarm_name` 변수도 바꿔야 합니다.
 - **자동 복구는 기본으로 꺼져 있습니다** (`auto_recovery_enabled = false`). 하트비트가 꾸준히 들어오는 걸 확인한 뒤 `terraform.tfvars`에 `auto_recovery_enabled = true`를 넣고 다시 `apply` 합니다.
