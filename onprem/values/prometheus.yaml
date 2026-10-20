@@ -3,6 +3,12 @@
 # 차트 기본값: https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/values.yaml
 
 prometheus:
+  # 웹 UI(http-web 9090) NodePort 31230 고정 (온프레 실제 값과 같게, DR 에서도 같은 포트)
+  # 설정 리로더(reloader 8080) 포트는 고정하지 않음 (쿠버네티스가 무작위 배정)
+  service:
+    type: NodePort
+    nodePort: 31230
+
   prometheusSpec:
     retention: 15d
 
