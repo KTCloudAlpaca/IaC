@@ -37,7 +37,7 @@ variable "app_images" {
   description = "DR 서버가 ECR 에서 받을 앱 이미지와 태그 (onprem/app.tf 의 이미지 태그와 같게)"
   default = {
     "launcher-frontend" = "v1"
-    "launcher-backend"  = "v2" # prom-client /metrics
+    "launcher-backend"  = "v3" # v3: /api/dr-ready, v2: /metrics
   }
 }
 

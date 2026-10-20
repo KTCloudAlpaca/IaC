@@ -69,7 +69,7 @@ resource "kubernetes_deployment_v1" "backend" {
 
         container {
           name              = "backend"
-          image             = "launcher-backend:v2" # v2: prom-client /metrics
+          image             = "launcher-backend:v3" # v3: /api/dr-ready 추가 (v2: prom-client /metrics)
           image_pull_policy = "IfNotPresent"
 
           port {
