@@ -31,6 +31,8 @@ import {
 }
 
 # backend 가 쓰는 MongoDB 접속 정보
+# 주소 끝의 "." = 완전한 이름(FQDN). DNS 검색 도메인(localdomain)을 외부 VMware DNS 에 묻지 않게 해서
+# 재부팅 직후 외부 DNS 가 늦게 뜰 때 backend 가 주소를 못 찾고 죽는 문제(EAI_AGAIN) 방지
 resource "kubernetes_secret_v1" "backend" {
   metadata {
     name      = "backend-secret"
@@ -38,7 +40,7 @@ resource "kubernetes_secret_v1" "backend" {
   }
 
   data = {
-    MONGODB_URI = "mongodb://root:${var.mongo_root_password}@mongodb.db.svc.cluster.local:27017/launcher?authSource=admin"
+    MONGODB_URI = "mongodb://root:${var.mongo_root_password}@mongodb.db.svc.cluster.local.:27017/launcher?authSource=admin"
   }
 }
 

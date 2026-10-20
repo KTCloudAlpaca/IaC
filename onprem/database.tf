@@ -146,7 +146,7 @@ resource "kubernetes_deployment_v1" "mongo_express" {
 
           env {
             name  = "ME_CONFIG_MONGODB_SERVER"
-            value = "mongodb.db.svc.cluster.local"
+            value = "mongodb.db.svc.cluster.local." # 끝의 "." : app.tf backend-secret 주석 참고
           }
           env {
             name  = "ME_CONFIG_MONGODB_PORT"
