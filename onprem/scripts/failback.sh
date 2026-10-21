@@ -6,7 +6,7 @@
 #   2. 온프레 앱을 0 개로 내림 -> /primary-health 실패 -> 트래픽은 계속 DR 에
 #   3. 온프레 현재 DB 를 S3 에 스냅샷 (덮어쓰기 전 안전장치)
 #   4. CodeBuild(failback-export): DR 앱 중지 + DR DB 덤프 -> S3   (서비스 중단 시작)
-#   5. DR 덤프를 온프레 MongoDB 에 복원 -> 온프레 앱 시작 -> Route 53 이 온프레로 전환 (서비스 재개)
+#   5. DR 덤프를 온프레 MongoDB 에 복원 -> 30초 대기 -> 온프레 앱 시작 -> Route 53 이 온프레로 전환 (서비스 재개)
 #   6. CodeBuild(failback-finish): DR 서버 nginx 원복 + DR 환경 destroy -> 삭제 확인
 #
 # 필요: kubectl(온프레), aws CLI, 권한 = codebuild:StartBuild/BatchGetBuilds, s3 failback/ 읽기쓰기, ssm:GetParameter
@@ -20,6 +20,7 @@ PRIMARY_IP=43.202.217.158
 MONGO_PASSWORD_PARAMETER=/wegovy/dr/mongo-root-password
 APP_NAMESPACE=app
 APP_DEPLOYMENTS=(backend frontend)
+APP_START_DELAY=30 # DB 복원·연결 확인 후 앱 시작 전 대기(초)
 
 FAILBACK_ID=$(date +%Y%m%d-%H%M%S)
 WORK=$(mktemp -d)
@@ -126,6 +127,9 @@ log "5. DR 데이터를 온프레 MongoDB 에 복원"
 mongo mongorestore --archive --drop --stopOnError \
   --nsExclude 'admin.*' --nsExclude 'config.*' < "$WORK/dr.archive"
 [ "$(mongo mongosh --quiet --eval 'db.adminCommand("ping").ok' | tail -1)" = "1" ]
+
+log "   DB 연결 확인 -> ${APP_START_DELAY}초 대기 후 앱 시작"
+sleep "$APP_START_DELAY"
 
 log "   온프레 앱 시작 (헬스체크 정상 -> Route 53 이 온프레로 전환)"
 for d in "${APP_DEPLOYMENTS[@]}"; do
