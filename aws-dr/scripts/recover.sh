@@ -82,8 +82,6 @@ done
 log DR_APPS_READY
 
 # ---------- 5. nginx: 로컬 클러스터로 ----------
-# 현재 EC2Backup nginx(conf.d/alpaca-secondary.conf, 팀원 관리)는 항상 로컬 127.0.0.1:30080 을 가리킴 -> reload 로 반영
-# 온프레 터널(10.200.0.2:30080)을 가리키는 설정이 남아 있으면 로컬로 바꾸고 원본은 conf.d 밖에 보관 (페일백 때 되돌림)
 mkdir -p "$NGINX_BACKUP_DIR"
 for f in /etc/nginx/conf.d/*.conf; do
   grep -q "$ONPREM_UPSTREAM" "$f" || continue

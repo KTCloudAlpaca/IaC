@@ -1,5 +1,5 @@
 # 팀원 하트비트 알람(EC2-trigger-alarm)이 OK -> ALARM 으로 바뀌면 CodeBuild 복구 실행
-#   하트비트: OnPrem/Kubernetes / Heartbeat / Cluster=onprem-k8s, 5분 동안 없으면 ALARM
+#   하트비트: OnPrem/Kubernetes / Heartbeat / Cluster=onprem-k8s, 2분 동안 없으면 ALARM
 #   팀원 알람과 SNS 이메일 설정은 건드리지 않음
 # previousState = OK 조건: 데이터 없음(INSUFFICIENT_DATA) -> ALARM 일 때는 복구가 돌지 않게 함
 locals {

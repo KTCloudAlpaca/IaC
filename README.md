@@ -15,7 +15,7 @@ Terraform 명령은 **각 폴더 안에서** 실행합니다.
 ## 복구 흐름
 
 ```
-온프레 하트비트 끊김 (5분)
+온프레 하트비트 끊김 (2분)
   → 팀원 알람 EC2-trigger-alarm (OK → ALARM)
   → EventBridge → CodeBuild
   → SSM Run Command 로 DR 서버(EC2Backup)에서 recover.sh 실행 (평소엔 쿠버네티스만 설치된 상태)
