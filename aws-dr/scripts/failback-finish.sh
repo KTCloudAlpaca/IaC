@@ -49,8 +49,10 @@ rm -f "$STATE_DIR/restored"
 tf_init
 
 # 네임스페이스는 코드에 prevent_destroy (온프레 보호용) -> state 에서만 빼고 아래에서 kubectl 로 삭제
+# (tf state list | grep -q 는 pipefail 때문에 SIGPIPE 로 실패할 수 있어 목록을 먼저 받아둠)
+state=$(tf state list)
 for ns in $NAMESPACES; do
-  if tf state list | grep -qx "kubernetes_namespace_v1.this\[\"$ns\"\]"; then
+  if grep -qx "kubernetes_namespace_v1.this\[\"$ns\"\]" <<<"$state"; then
     tf state rm "kubernetes_namespace_v1.this[\"$ns\"]" >/dev/null
   fi
 done
